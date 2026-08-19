@@ -510,6 +510,10 @@ def _hermetic_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("LANG", "C.UTF-8")
     monkeypatch.setenv("LC_ALL", "C.UTF-8")
     monkeypatch.setenv("PYTHONHASHSEED", "0")
+    # Pin the Hermes UI language: i18n-localized strings must render in English
+    # so unit tests assert the English wording contract regardless of the
+    # developer's display.language. Tests of other locales set it explicitly.
+    monkeypatch.setenv("HERMES_LANGUAGE", "en")
 
     # 4b. Disable AWS IMDS lookups. Without this, any test that ends up
     #     calling has_aws_credentials() / resolve_aws_auth_env_var()

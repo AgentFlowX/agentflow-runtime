@@ -91,6 +91,25 @@ gateway:
     no_response_reconnecting: "⚠ no response from provider in {secs}s — reconnecting..."
     no_response_for:          "⚠️ No response from provider for {secs}s (model: {model}, context: ~{ctx} tokens). Reconnecting..."
 
+  busy:
+    steered:          "⏩ Steered into current run{detail}. Your message arrives after the next tool call."
+    redirected:       "↪ Redirected current run{detail}. I'll adjust using your correction."
+    subagent:         "⏳ Subagent working{detail} — your message is queued for when it finishes (use /stop to cancel everything)."
+    compressing:      "⏳ Compressing context{detail} — your message is queued for when it finishes (use /stop to cancel everything)."
+    queued:           "⏳ Queued for the next turn{detail}. I'll respond once the current task finishes."
+    interrupting:     "⚡ Interrupting current task{detail}. I'll respond to your message shortly."
+    detail_elapsed:   "{mins} min elapsed"
+    detail_running:   "running: {tool}"
+    queued_ack:       "Queued for the next turn."
+    queued_ack_depth: "Queued for the next turn. ({depth} queued)"
+
+  shutdown:
+    cron_interrupted_restart:  "⚠️ Cron job '{job}' was interrupted — the gateway is restarting and killed the run before it finished. No result was produced for this run."
+    cron_interrupted_shutdown: "⚠️ Cron job '{job}' was interrupted — the gateway is shutting down and killed the run before it finished. No result was produced for this run."
+    notify_restart:            "⚠️ Gateway restarting — Your current task will be interrupted. Send any message after restart and I'll try to resume where you left off."
+    notify_shutdown:           "⚠️ Gateway shutting down — Your current task will be interrupted."
+    restarted_ok:              "♻ Gateway restarted successfully. Your session continues."
+
   agents:
     header:                "🤖 **Agentes y tareas activos**"
     active_agents:         "**Agentes activos:** {count}"

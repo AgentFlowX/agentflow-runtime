@@ -10068,48 +10068,30 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 if start_ts:
                     elapsed_min = int((now - start_ts) / 60)
                     if elapsed_min > 0:
-                        status_parts.append(f"{elapsed_min} min elapsed")
+                        status_parts.append(t("gateway.busy.detail_elapsed", mins=elapsed_min))
                 if max_iter:
                     status_parts.append(f"iteration {iteration}/{max_iter}")
                 if current_tool:
-                    status_parts.append(f"running: {current_tool}")
+                    status_parts.append(t("gateway.busy.detail_running", tool=current_tool))
             except Exception:
                 pass
 
         status_detail = f" ({', '.join(status_parts)})" if status_parts else ""
         if is_steer_mode:
-            message = (
-                f"⏩ Steered into current run{status_detail}. "
-                f"Your message arrives after the next tool call."
-            )
+            message = t("gateway.busy.steered", detail=status_detail)
         elif is_redirect_mode:
-            message = (
-                f"↪ Redirected current run{status_detail}. "
-                f"I'll adjust using your correction."
-            )
+            message = t("gateway.busy.redirected", detail=status_detail)
         elif is_queue_mode and demoted_for_subagents:
             # #30170 — explain the demotion so the user knows their
             # follow-up didn't accidentally kill the subagent and
             # discovers `/stop` as the explicit escape hatch.
-            message = (
-                f"⏳ Subagent working{status_detail} — your message is queued for "
-                f"when it finishes (use /stop to cancel everything)."
-            )
+            message = t("gateway.busy.subagent", detail=status_detail)
         elif is_queue_mode and demoted_for_compression:
-            message = (
-                f"⏳ Compressing context{status_detail} — your message is queued for "
-                f"when it finishes (use /stop to cancel everything)."
-            )
+            message = t("gateway.busy.compressing", detail=status_detail)
         elif is_queue_mode:
-            message = (
-                f"⏳ Queued for the next turn{status_detail}. "
-                f"I'll respond once the current task finishes."
-            )
+            message = t("gateway.busy.queued", detail=status_detail)
         else:
-            message = (
-                f"⚡ Interrupting current task{status_detail}. "
-                f"I'll respond to your message shortly."
-            )
+            message = t("gateway.busy.interrupting", detail=status_detail)
 
         # First-touch onboarding: the very first time a user sends a message
         # while the agent is busy, append a one-time hint explaining the
@@ -10279,7 +10261,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             logger.debug("Cron interrupt notification unavailable: %s", e)
             return 0
 
-        action = "restarting" if self._restart_requested else "shutting down"
         notified: set = set()
         for job_id in job_ids:
             try:
@@ -10296,10 +10277,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             if not targets:
                 continue
 
+            _job_label = job.get('name') or job_id
             msg = (
-                f"⚠️ Cron job '{job.get('name') or job_id}' was interrupted — "
-                f"the gateway is {action} and killed the run before it "
-                "finished. No result was produced for this run."
+                t("gateway.shutdown.cron_interrupted_restart", job=_job_label)
+                if self._restart_requested
+                else t("gateway.shutdown.cron_interrupted_shutdown", job=_job_label)
             )
             for target in targets:
                 try:
@@ -10358,14 +10340,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         active = self._snapshot_running_agents()
         restart_source = self._restart_command_source if self._restart_requested else None
 
-        action = "restarting" if self._restart_requested else "shutting down"
-        hint = (
-            "Your current task will be interrupted. "
-            "Send any message after restart and I'll try to resume where you left off."
+        msg = (
+            t("gateway.shutdown.notify_restart")
             if self._restart_requested
-            else "Your current task will be interrupted."
+            else t("gateway.shutdown.notify_shutdown")
         )
-        msg = f"⚠️ Gateway {action} — {hint}"
 
         notified: set[tuple[str, str, Optional[str]]] = set()
         for session_key in active:
@@ -15871,8 +15850,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             self._enqueue_fifo(quick_key, queued_event, adapter)
         depth = self._queue_depth(quick_key, adapter=self._adapter_for_source(source))
         if depth <= 1:
-            return "Queued for the next turn."
-        return f"Queued for the next turn. ({depth} queued)"
+            return t("gateway.busy.queued_ack")
+        return t("gateway.busy.queued_ack_depth", depth=depth)
 
     async def _busy_steer_command(self, event: MessageEvent, quick_key: str, source):
         # /steer <prompt> — inject mid-run after the next tool call.
@@ -23659,7 +23638,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             result = await transport.send(
                 platform,
                 str(chat_id),
-                "♻ Gateway restarted successfully. Your session continues.",
+                t("gateway.shutdown.restarted_ok"),
                 metadata=_non_conversational_metadata(metadata, platform=platform),
             )
             # adapter.send() catches provider errors (e.g. "Chat not found")
