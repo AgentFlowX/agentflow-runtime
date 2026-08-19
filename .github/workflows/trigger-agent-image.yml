@@ -1,0 +1,19 @@
+name: trigger-agent-image
+
+# When runtime code lands on main, rebuild the agent image (which COPYs this repo
+# into the image). Build only — the fleet ROLLOUT stays a deliberate manual gate
+# (`gh workflow run agent-image.yml -f deploy=true`), mirroring the platform's
+# push=build / deploy=dispatch model. Needs a PAT (actions:write on
+# AgentFlowX/agentflow-platform) in secret PLATFORM_DISPATCH_TOKEN.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  rebuild-agent-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger platform agent-image build
+        env:
+          GH_TOKEN: ${{ secrets.PLATFORM_DISPATCH_TOKEN }}
+        run: gh workflow run agent-image.yml --repo AgentFlowX/agentflow-platform
