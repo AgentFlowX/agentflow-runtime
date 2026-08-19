@@ -122,7 +122,7 @@ gateway:
     cron_interrupted_restart:  "⚠️ Cron job '{job}' was interrupted — the gateway is restarting and killed the run before it finished. No result was produced for this run."
     cron_interrupted_shutdown: "⚠️ Cron job '{job}' was interrupted — the gateway is shutting down and killed the run before it finished. No result was produced for this run."
     notify_restart:            "⚠️ Gateway restarting — Your current task will be interrupted. Send any message after restart and I'll try to resume where you left off."
-    notify_shutdown:           "⚠️ Gateway shutting down — Your current task will be interrupted."
+    notify_shutdown:           "⚠️ Gateway is shutting down — usually a new version is rolling out, or a critical error occurred. Your current task was interrupted. Give me a moment, then send your message again and I'll pick up where we left off."
     restarted_ok:              "♻ Gateway restarted successfully. Your session continues."
 
   heartbeat:

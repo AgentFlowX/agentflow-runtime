@@ -387,7 +387,7 @@ async def test_shutdown_notifications_use_cached_live_thread_source_when_origin_
 
     adapter.send.assert_awaited_once_with(
         "parent-42",
-        "⚠️ Gateway shutting down — Your current task will be interrupted.",
+        "⚠️ Gateway is shutting down — usually a new version is rolling out, or a critical error occurred. Your current task was interrupted. Give me a moment, then send your message again and I'll pick up where we left off.",
         metadata={"thread_id": "topic-7"},
     )
 
