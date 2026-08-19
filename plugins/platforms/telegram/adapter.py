@@ -6486,9 +6486,10 @@ class TelegramAdapter(BasePlatformAdapter):
         self, query, data: str, chat_id: str
     ) -> None:
         """Handle choice picker button taps (cp:<index>)."""
+        from agent.i18n import t
         state = self._choice_picker_state.get(chat_id)
         if not state:
-            await query.answer(text="Picker expired — run the command again.")
+            await query.answer(text=t("gateway.picker.picker_expired_generic"))
             return
 
         # Same authorization gate as approval buttons: unauthorized users in a
@@ -6503,26 +6504,26 @@ class TelegramAdapter(BasePlatformAdapter):
             thread_id=str(getattr(query_message, "message_thread_id", None)) if getattr(query_message, "message_thread_id", None) is not None else None,
             user_name=getattr(query.from_user, "first_name", None),
         ):
-            await query.answer(text="⛔ You are not authorized to change this setting.")
+            await query.answer(text=t("gateway.picker.unauthorized"))
             return
 
         try:
             idx = int(data[3:])
             choice = state["choices"][idx]
         except (ValueError, IndexError):
-            await query.answer(text="Invalid selection.")
+            await query.answer(text=t("gateway.picker.invalid_selection"))
             return
 
         callback = state.get("on_choice_selected")
         if not callback:
-            await query.answer(text="Picker expired.")
+            await query.answer(text=t("gateway.picker.picker_expired"))
             return
 
         try:
             result_text = await callback(chat_id, str(choice.get("value") or ""))
         except Exception as exc:
             logger.error("Choice picker selection failed: %s", exc)
-            result_text = f"Error applying selection: {exc}"
+            result_text = t("gateway.picker.error_applying", error=exc)
 
         try:
             await query.edit_message_text(
@@ -6599,10 +6600,10 @@ class TelegramAdapter(BasePlatformAdapter):
         if total_pages > 1:
             nav: list = []
             if page > 0:
-                nav.append(InlineKeyboardButton("◀ Prev", callback_data=f"mpv:{page - 1}"))
+                nav.append(InlineKeyboardButton(t("gateway.picker.prev"), callback_data=f"mpv:{page - 1}"))
             nav.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="mx:noop"))
             if page < total_pages - 1:
-                nav.append(InlineKeyboardButton("Next ▶", callback_data=f"mpv:{page + 1}"))
+                nav.append(InlineKeyboardButton(t("gateway.picker.next"), callback_data=f"mpv:{page + 1}"))
             rows.append(nav)
 
         from agent.i18n import t
@@ -6635,15 +6636,15 @@ class TelegramAdapter(BasePlatformAdapter):
         if total_pages > 1:
             nav: list = []
             if page > 0:
-                nav.append(InlineKeyboardButton("◀ Prev", callback_data=f"mg:{page - 1}"))
+                nav.append(InlineKeyboardButton(t("gateway.picker.prev"), callback_data=f"mg:{page - 1}"))
             nav.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="mx:noop"))
             if page < total_pages - 1:
-                nav.append(InlineKeyboardButton("Next ▶", callback_data=f"mg:{page + 1}"))
+                nav.append(InlineKeyboardButton(t("gateway.picker.next"), callback_data=f"mg:{page + 1}"))
             rows.append(nav)
 
         from agent.i18n import t
         rows.append([
-            InlineKeyboardButton("◀ Back", callback_data="mb"),
+            InlineKeyboardButton(t("gateway.picker.back"), callback_data="mb"),
             InlineKeyboardButton(t("gateway.picker.cancel"), callback_data="mx"),
         ])
 
@@ -6653,9 +6654,10 @@ class TelegramAdapter(BasePlatformAdapter):
         self, query, data: str, chat_id: str
     ) -> None:
         """Handle model picker inline keyboard callbacks (mp:/mm:/mc:/mb:/mx:/mg:)."""
+        from agent.i18n import t
         state = self._model_picker_state.get(chat_id)
         if not state:
-            await query.answer(text="Picker expired — use /model again.")
+            await query.answer(text=t("gateway.picker.picker_expired_model"))
             return
 
         try:
@@ -6686,14 +6688,17 @@ class TelegramAdapter(BasePlatformAdapter):
             pname = provider.get("name", provider_slug)
             total = provider.get("total_models", len(models))
             shown = len(models)
-            extra = f"\n_{total - shown} more available — type `/model <name>` directly_" if total > shown else ""
+            extra = t("gateway.model_picker.more_available", count=total - shown) if total > shown else ""
 
             await query.edit_message_text(
                 text=self.format_message(
                     (
-                        f"⚙ *Model Configuration*\n\n"
-                        f"Provider: *{pname}*{page_info}\n"
-                        f"Select a model:{extra}"
+                        t(
+                            "gateway.model_picker.select_model",
+                            provider=pname,
+                            page_info=page_info,
+                            extra=extra,
+                        )
                     )
                 ),
                 parse_mode=ParseMode.MARKDOWN_V2,
@@ -6722,14 +6727,17 @@ class TelegramAdapter(BasePlatformAdapter):
             )
             total = provider.get("total_models", len(models)) if provider else len(models)
             shown = len(models)
-            extra = f"\n_{total - shown} more available — type `/model <name>` directly_" if total > shown else ""
+            extra = t("gateway.model_picker.more_available", count=total - shown) if total > shown else ""
 
             await query.edit_message_text(
                 text=self.format_message(
                     (
-                        f"⚙ *Model Configuration*\n\n"
-                        f"Provider: *{pname}*{page_info}\n"
-                        f"Select a model:{extra}"
+                        t(
+                            "gateway.model_picker.select_model",
+                            provider=pname,
+                            page_info=page_info,
+                            extra=extra,
+                        )
                     )
                 ),
                 parse_mode=ParseMode.MARKDOWN_V2,
@@ -6758,10 +6766,10 @@ class TelegramAdapter(BasePlatformAdapter):
             await query.edit_message_text(
                 text=self.format_message(
                     (
-                        f"⚙ *Model Configuration*\n\n"
-                        f"Current model: `{state['current_model'] or 'unknown'}`\n"
-                        f"Provider: {provider_label}\n\n"
-                        f"Select a provider:{provider_page_info}"
+                        f"{t('gateway.model_picker.title')}\n\n"
+                        f"{t('gateway.model_picker.current_model', model=state['current_model'] or t('gateway.model_picker.unknown'))}\n"
+                        f"{t('gateway.model_picker.provider', provider=provider_label)}\n\n"
+                        f"{t('gateway.model_picker.select_provider')}{provider_page_info}"
                     )
                 ),
                 parse_mode=ParseMode.MARKDOWN_V2,
@@ -6774,12 +6782,12 @@ class TelegramAdapter(BasePlatformAdapter):
             try:
                 idx = int(data[3:])
             except ValueError:
-                await query.answer(text="Invalid selection.")
+                await query.answer(text=t("gateway.picker.invalid_selection"))
                 return
 
             model_list = state.get("model_list", [])
             if idx < 0 or idx >= len(model_list):
-                await query.answer(text="Invalid model index.")
+                await query.answer(text=t("gateway.picker.invalid_model_index"))
                 return
 
             model_id = model_list[idx]
@@ -6787,7 +6795,7 @@ class TelegramAdapter(BasePlatformAdapter):
             callback = state.get("on_model_selected")
 
             if not callback:
-                await query.answer(text="Picker expired.")
+                await query.answer(text=t("gateway.picker.picker_expired"))
                 return
 
             switch_failed = False
@@ -6814,7 +6822,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 except Exception:
                     pass
             await query.answer(
-                text="Switch failed." if switch_failed else "Model switched!"
+                text=t("gateway.picker.switch_failed") if switch_failed else t("gateway.picker.model_switched")
             )
             self._model_picker_state.pop(chat_id, None)
 
@@ -6823,12 +6831,12 @@ class TelegramAdapter(BasePlatformAdapter):
             try:
                 idx = int(data[3:])
             except ValueError:
-                await query.answer(text="Invalid selection.")
+                await query.answer(text=t("gateway.picker.invalid_selection"))
                 return
 
             model_list = state.get("model_list", [])
             if idx < 0 or idx >= len(model_list):
-                await query.answer(text="Invalid model index.")
+                await query.answer(text=t("gateway.picker.invalid_model_index"))
                 return
 
             model_id = model_list[idx]
@@ -6836,7 +6844,7 @@ class TelegramAdapter(BasePlatformAdapter):
             callback = state.get("on_model_selected")
 
             if not callback:
-                await query.answer(text="Picker expired.")
+                await query.answer(text=t("gateway.picker.picker_expired"))
                 return
 
             try:
@@ -6853,10 +6861,10 @@ class TelegramAdapter(BasePlatformAdapter):
                 warning = None
             if warning is not None:
                 keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Switch anyway", callback_data=f"mc:{idx}")],
+                    [InlineKeyboardButton(t("gateway.picker.switch_anyway"), callback_data=f"mc:{idx}")],
                     [
-                        InlineKeyboardButton("◀ Back", callback_data="mb"),
-                        InlineKeyboardButton("✗ Cancel", callback_data="mx"),
+                        InlineKeyboardButton(t("gateway.picker.back"), callback_data="mb"),
+                        InlineKeyboardButton(t("gateway.picker.cancel"), callback_data="mx"),
                     ],
                 ])
                 await query.edit_message_text(
@@ -6866,7 +6874,7 @@ class TelegramAdapter(BasePlatformAdapter):
                     parse_mode=ParseMode.MARKDOWN_V2,
                     reply_markup=keyboard,
                 )
-                await query.answer(text="Confirm model selection")
+                await query.answer(text=t("gateway.picker.confirm_selection"))
                 return
 
             switch_failed = False
@@ -6895,7 +6903,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 except Exception:
                     pass
             await query.answer(
-                text="Switch failed." if switch_failed else "Model switched!"
+                text=t("gateway.picker.switch_failed") if switch_failed else t("gateway.picker.model_switched")
             )
 
             # Clean up state
@@ -6927,17 +6935,18 @@ class TelegramAdapter(BasePlatformAdapter):
                 )
             rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
             rows.append([
-                InlineKeyboardButton("◀ Back", callback_data="mb"),
-                InlineKeyboardButton("✗ Cancel", callback_data="mx"),
+                InlineKeyboardButton(t("gateway.picker.back"), callback_data="mb"),
+                InlineKeyboardButton(t("gateway.picker.cancel"), callback_data="mx"),
             ])
             keyboard = InlineKeyboardMarkup(rows)
 
             await query.edit_message_text(
                 text=self.format_message(
                     (
-                        f"⚙ *Model Configuration*\n\n"
-                        f"Provider family: *{_label or group_id}*\n\n"
-                        f"Select a provider:"
+                        t(
+                            "gateway.model_picker.select_provider_family",
+                            family=_label or group_id,
+                        )
                     )
                 ),
                 parse_mode=ParseMode.MARKDOWN_V2,
@@ -6960,10 +6969,10 @@ class TelegramAdapter(BasePlatformAdapter):
             await query.edit_message_text(
                 text=self.format_message(
                     (
-                        f"⚙ *Model Configuration*\n\n"
-                        f"Current model: `{state['current_model'] or 'unknown'}`\n"
-                        f"Provider: {provider_label}\n\n"
-                        f"Select a provider:{provider_page_info}"
+                        f"{t('gateway.model_picker.title')}\n\n"
+                        f"{t('gateway.model_picker.current_model', model=state['current_model'] or t('gateway.model_picker.unknown'))}\n"
+                        f"{t('gateway.model_picker.provider', provider=provider_label)}\n\n"
+                        f"{t('gateway.model_picker.select_provider')}{provider_page_info}"
                     )
                 ),
                 parse_mode=ParseMode.MARKDOWN_V2,
@@ -6975,7 +6984,7 @@ class TelegramAdapter(BasePlatformAdapter):
             # --- Cancel ---
             self._model_picker_state.pop(chat_id, None)
             await query.edit_message_text(
-                text="Model selection cancelled.",
+                text=t("gateway.picker.selection_cancelled"),
                 reply_markup=None,
             )
             await query.answer()

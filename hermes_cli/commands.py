@@ -1027,6 +1027,25 @@ def _collect_gateway_skill_entries(
 # Platform-specific wrappers
 # ---------------------------------------------------------------------------
 
+def _localized_command_description(name: str, default: str) -> str:
+    """Localize a core command's menu description via the i18n catalog.
+
+    Falls back to the English ``default`` when no translation exists (missing
+    key → ``t`` returns the dotted key path, which we detect and ignore). Used
+    for the Telegram command menu (``setMyCommands``) so the ``/`` hint list
+    renders in the gateway's ``display.language``.
+    """
+    try:
+        from agent.i18n import t
+
+        localized = t(f"gateway.commands_menu.{name}")
+        if localized and not localized.startswith("gateway.commands_menu."):
+            return localized
+    except Exception:
+        pass
+    return default
+
+
 def telegram_menu_commands(max_commands: int = 100) -> tuple[list[tuple[str, str]], int]:
     """Return Telegram menu commands capped to the Bot API limit.
 
@@ -1045,6 +1064,7 @@ def telegram_menu_commands(max_commands: int = 100) -> tuple[list[tuple[str, str
         commands omitted due to the cap.
     """
     core_commands = _prioritize_telegram_menu_commands(list(telegram_bot_commands()))
+    core_commands = [(n, _localized_command_description(n, d)) for n, d in core_commands]
     reserved_names = {n for n, _ in core_commands}
     all_commands = list(core_commands)
     hidden_core_count = max(0, len(all_commands) - max_commands)
