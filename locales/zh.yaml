@@ -110,6 +110,20 @@ gateway:
     notify_shutdown:           "⚠️ Gateway shutting down — Your current task will be interrupted."
     restarted_ok:              "♻ Gateway restarted successfully. Your session continues."
 
+  heartbeat:
+    working: "⏳ Working — {mins} min{detail}"
+
+  timeout:
+    inactive:       "⏱️ Agent inactive for {mins} min — no tool calls or API responses."
+    stuck_tool:     "The agent appears stuck on tool `{tool}` ({secs}s since last activity, iteration {iter}/{max})."
+    last_activity:  "Last activity: {desc} ({secs}s ago, iteration {iter}/{max}). The agent may have been waiting on an API response."
+    increase_limit: "To increase the limit, set agent.gateway_timeout in config.yaml (value in seconds, 0 = no limit) and restart the gateway.\nTry again, or use /reset to start fresh."
+
+  budget:
+    exhausted_status: "⚠️ Iteration budget exhausted ({used}/{max}) — asking model to summarise"
+    exhausted_print:  "\n⚠️  Iteration budget exhausted ({used}/{max}) — requesting summary..."
+    exhausted_loop:   "\n⚠️  Iteration budget exhausted ({used}/{max} iterations used)"
+
   agents:
     header:                "🤖 **活跃代理与任务**"
     active_agents:         "**活跃代理：** {count}"

@@ -143,6 +143,28 @@ def _copy_default_catalog() -> dict[str, list[str]]:
     return {surface: list(phrases) for surface, phrases in _DEFAULT_PHRASES.items()}
 
 
+def _merge_localized_builtin(catalog: dict[str, list[str]]) -> None:
+    """Overlay locale-specific built-in phrases (``status_phrases.<lang>.yaml``).
+
+    Replaces the English defaults when the Hermes UI language selects a shipped
+    localized catalog. English — and any language without a shipped file — keeps
+    the English defaults. Resolved per catalog build (not import time) so the
+    active ``display.language`` is honoured. User-configured phrases still merge
+    on top afterwards.
+    """
+    try:
+        from agent.i18n import get_language
+
+        lang = get_language()
+    except Exception:
+        return
+    if not lang or lang == "en":
+        return
+    localized = Path(__file__).resolve().parent / "assets" / f"status_phrases.{lang}.yaml"
+    if localized.exists():
+        _merge_phrase_file(catalog, localized, inherited_mode="replace")
+
+
 def _merge_phrase_config(catalog: dict[str, list[str]], section: Any, *, base_dir: Path | None = None) -> None:
     """Merge one display.status_phrases-style section into ``catalog``."""
     if not isinstance(section, Mapping):
@@ -163,6 +185,7 @@ def resolve_status_phrase_catalog(user_config: Mapping[str, Any] | None, platfor
     ``display.platforms.<platform>.status_phrases``.
     """
     catalog = _copy_default_catalog()
+    _merge_localized_builtin(catalog)
     hermes_home = get_hermes_home()
     _merge_phrase_paths(catalog, list(_CONVENTIONAL_RELATIVE_PATHS), base_dir=hermes_home)
 

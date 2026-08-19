@@ -28194,7 +28194,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 _heartbeat_text = (
                     _generic_status_phrase("status")
                     if _long_running_mode == "generic"
-                    else f"⏳ Working — {_elapsed_mins} min{_status_detail}"
+                    else t("gateway.heartbeat.working", mins=_elapsed_mins, detail=_status_detail)
                 )
                 try:
                     _notify_res = None
@@ -28532,26 +28532,29 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
                 # Construct a user-facing message with diagnostic context.
                 _diag_lines = [
-                    f"⏱️ Agent inactive for {_timeout_mins} min — no tool calls "
-                    f"or API responses."
+                    t("gateway.timeout.inactive", mins=_timeout_mins)
                 ]
                 if _cur_tool:
                     _diag_lines.append(
-                        f"The agent appears stuck on tool `{_cur_tool}` "
-                        f"({_secs_ago:.0f}s since last activity, "
-                        f"iteration {_iter_n}/{_iter_max})."
+                        t(
+                            "gateway.timeout.stuck_tool",
+                            tool=_cur_tool,
+                            secs=f"{_secs_ago:.0f}",
+                            iter=_iter_n,
+                            max=_iter_max,
+                        )
                     )
                 else:
                     _diag_lines.append(
-                        f"Last activity: {_last_desc} ({_secs_ago:.0f}s ago, "
-                        f"iteration {_iter_n}/{_iter_max}). "
-                        "The agent may have been waiting on an API response."
+                        t(
+                            "gateway.timeout.last_activity",
+                            desc=_last_desc,
+                            secs=f"{_secs_ago:.0f}",
+                            iter=_iter_n,
+                            max=_iter_max,
+                        )
                     )
-                _diag_lines.append(
-                    "To increase the limit, set agent.gateway_timeout in config.yaml "
-                    "(value in seconds, 0 = no limit) and restart the gateway.\n"
-                    "Try again, or use /reset to start fresh."
-                )
+                _diag_lines.append(t("gateway.timeout.increase_limit"))
 
                 response = {
                     "final_response": "\n".join(_diag_lines),
