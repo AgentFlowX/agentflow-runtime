@@ -698,7 +698,8 @@ def _codex_wait_notice_recovery(
         deadlines.append(max(0.0, last_event_ts - call_start) + idle_timeout)
     if not deadlines or min(deadlines) <= elapsed:
         return ""
-    return f"; auto-reconnect at {int(min(deadlines))}s"
+    from agent.i18n import t as _i18n_t
+    return _i18n_t("gateway.wait.recovery_auto_reconnect", secs=int(min(deadlines)))
 
 
 # ── Cross-turn stale-call circuit breaker (#58962) ─────────────────────
@@ -1627,10 +1628,14 @@ def interruptible_api_call(agent, api_kwargs: dict):
                     idle_timeout=_codex_idle_timeout,
                     elapsed=_elapsed,
                 )
+                from agent.i18n import t as _i18n_t
                 agent._emit_wait_notice(
-                    f"⏳ waiting on {api_kwargs.get('model', 'the provider')} — "
-                    f"{int(_elapsed)}s with no response yet (provider may be slow "
-                    f"or overloaded{_recovery})"
+                    _i18n_t(
+                        "gateway.wait.no_response",
+                        model=api_kwargs.get("model", "the provider"),
+                        secs=int(_elapsed),
+                        recovery=_recovery,
+                    )
                 )
             except Exception:
                 logger.debug("wait-notice construction failed", exc_info=True)
@@ -1661,25 +1666,30 @@ def interruptible_api_call(agent, api_kwargs: dict):
                 "loop can reconnect.",
                 _elapsed, _ttfb_timeout, api_kwargs.get("model", "unknown"),
             )
+            from agent.i18n import t as _i18n_t
             if _silent_hint:
                 agent._buffer_status(
-                    f"⚠️ No first byte from provider in {int(_elapsed)}s "
-                    f"(codex stream, model: {api_kwargs.get('model', 'unknown')}). "
-                    f"Reconnecting. {_silent_hint}"
+                    _i18n_t(
+                        "gateway.wait.no_first_byte_hint",
+                        secs=int(_elapsed),
+                        model=api_kwargs.get("model", "unknown"),
+                        hint=_silent_hint,
+                    )
                 )
             else:
                 agent._buffer_status(
-                    f"⚠️ No first byte from provider in {int(_elapsed)}s "
-                    f"(codex stream, model: {api_kwargs.get('model', 'unknown')}). "
-                    f"Reconnecting."
+                    _i18n_t(
+                        "gateway.wait.no_first_byte",
+                        secs=int(_elapsed),
+                        model=api_kwargs.get("model", "unknown"),
+                    )
                 )
             try:
                 _close_request_client_once("codex_ttfb_kill")
             except Exception:
                 pass
             agent._emit_wait_notice(
-                f"⚠ no response from provider in {int(_elapsed)}s — "
-                f"reconnecting..."
+                _i18n_t("gateway.wait.no_response_reconnecting", secs=int(_elapsed))
             )
             agent._touch_activity(
                 f"codex stream killed after {int(_elapsed)}s with no first byte"
@@ -5102,13 +5112,21 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
                     _stream_stale_timeout is not None
                     and _stream_stale_timeout != float("inf")
                 ):
-                    _recovery = f"; auto-reconnect at {int(_stream_stale_timeout)}s"
+                    from agent.i18n import t as _i18n_t
+                    _recovery = _i18n_t(
+                        "gateway.wait.recovery_auto_reconnect",
+                        secs=int(_stream_stale_timeout),
+                    )
                 else:
                     _recovery = ""
+                from agent.i18n import t as _i18n_t
                 agent._emit_wait_notice(
-                    f"⏳ waiting on {api_kwargs.get('model', 'the provider')} — "
-                    f"{_waiting_secs}s with no output yet (provider may be "
-                    f"slow or overloaded, or the model is thinking{_recovery})"
+                    _i18n_t(
+                        "gateway.wait.no_output",
+                        model=api_kwargs.get("model", "the provider"),
+                        secs=_waiting_secs,
+                        recovery=_recovery,
+                    )
                 )
             else:
                 # Chunks are flowing — keep the activity tracker fresh but
@@ -5129,11 +5147,14 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
                 _stale_elapsed, _stream_stale_timeout,
                 api_kwargs.get("model", "unknown"), f"{_est_ctx:,}",
             )
+            from agent.i18n import t as _i18n_t
             agent._buffer_status(
-                f"⚠️ No response from provider for {int(_stale_elapsed)}s "
-                f"(model: {api_kwargs.get('model', 'unknown')}, "
-                f"context: ~{_est_ctx:,} tokens). "
-                f"Reconnecting..."
+                _i18n_t(
+                    "gateway.wait.no_response_for",
+                    secs=int(_stale_elapsed),
+                    model=api_kwargs.get("model", "unknown"),
+                    ctx=f"{_est_ctx:,}",
+                )
             )
             try:
                 _cancel_current_stream_attempt("stale_stream_kill")

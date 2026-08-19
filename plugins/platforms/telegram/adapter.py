@@ -6367,6 +6367,8 @@ class TelegramAdapter(BasePlatformAdapter):
             def get_label(slug):
                 return slug
 
+        from agent.i18n import t
+
         try:
             # Build provider buttons — folds provider groups (display only).
             keyboard, provider_page_info = self._build_provider_keyboard(providers, 0)
@@ -6374,10 +6376,10 @@ class TelegramAdapter(BasePlatformAdapter):
             provider_label = get_label(current_provider)
             text = self.format_message(
                 (
-                    f"⚙ *Model Configuration*\n\n"
-                    f"Current model: `{current_model or 'unknown'}`\n"
-                    f"Provider: {provider_label}\n\n"
-                    f"Select a provider:{provider_page_info}"
+                    f"{t('gateway.model_picker.title')}\n\n"
+                    f"{t('gateway.model_picker.current_model', model=current_model or t('gateway.model_picker.unknown'))}\n"
+                    f"{t('gateway.model_picker.provider', provider=provider_label)}\n\n"
+                    f"{t('gateway.model_picker.select_provider')}{provider_page_info}"
                 )
             )
 
@@ -6603,7 +6605,8 @@ class TelegramAdapter(BasePlatformAdapter):
                 nav.append(InlineKeyboardButton("Next ▶", callback_data=f"mpv:{page + 1}"))
             rows.append(nav)
 
-        rows.append([InlineKeyboardButton("✗ Cancel", callback_data="mx")])
+        from agent.i18n import t
+        rows.append([InlineKeyboardButton(t("gateway.picker.cancel"), callback_data="mx")])
 
         return InlineKeyboardMarkup(rows), page_meta["page_info"]
 
@@ -6638,9 +6641,10 @@ class TelegramAdapter(BasePlatformAdapter):
                 nav.append(InlineKeyboardButton("Next ▶", callback_data=f"mg:{page + 1}"))
             rows.append(nav)
 
+        from agent.i18n import t
         rows.append([
             InlineKeyboardButton("◀ Back", callback_data="mb"),
-            InlineKeyboardButton("✗ Cancel", callback_data="mx"),
+            InlineKeyboardButton(t("gateway.picker.cancel"), callback_data="mx"),
         ])
 
         return InlineKeyboardMarkup(rows), page_meta["page_info"]

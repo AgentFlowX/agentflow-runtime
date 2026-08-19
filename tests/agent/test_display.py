@@ -252,12 +252,16 @@ class TestBuildToolLabel:
         yield
         set_friendly_tool_labels(True)
 
-    def test_web_search_uses_for_connector(self):
+    def test_web_search_uses_for_connector(self, monkeypatch):
+        # Tool verbs are localized via i18n; this test pins the English contract.
+        monkeypatch.setenv("HERMES_LANGUAGE", "en")
         from agent.display import build_tool_label
         label = build_tool_label("web_search", {"query": "weather in NYC"})
         assert label == 'Searching the web for weather in NYC'
 
-    def test_web_extract_reads_url(self):
+    def test_web_extract_reads_url(self, monkeypatch):
+        # Tool verbs are localized via i18n; this test pins the English contract.
+        monkeypatch.setenv("HERMES_LANGUAGE", "en")
         from agent.display import build_tool_label
         label = build_tool_label("web_extract", {"urls": ["https://example.com/page"]})
         assert label is not None

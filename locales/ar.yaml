@@ -69,6 +69,51 @@ gateway:
     usage_switch_provider:  "`/model <name> --provider <slug>` — تبديل المزوّد"
     usage_persist:          "`/model <name> --global` — حفظ دائم"
 
+  model_picker:
+    title:                 "⚙ *إعدادات النموذج*"
+    current_model:         "النموذج الحالي: `{model}`"
+    provider:              "المزوّد: {provider}"
+    select_provider:       "اختر مزوّدًا:"
+    unknown:               "غير معروف"
+  picker:
+    cancel:                "✗ إلغاء"
+
+  tool_verbs:
+    web_search:         "Searching the web"
+    web_extract:        "Reading"
+    browser_navigate:   "Browsing"
+    browser_click:      "Clicking"
+    browser_type:       "Typing"
+    read_file:          "Reading"
+    write_file:         "Writing"
+    patch:              "Editing"
+    search_files:       "Searching files"
+    terminal:           "Running"
+    execute_code:       "Running code"
+    image_generate:     "Generating image"
+    video_generate:     "Generating video"
+    text_to_speech:     "Generating speech"
+    vision_analyze:     "Looking at the image"
+    session_search:     "Searching past sessions"
+    skill_view:         "Reading skill"
+    skills_list:        "Listing skills"
+    skill_manage:       "Updating skill"
+    delegate_task:      "Delegating"
+    cronjob:            "Scheduling"
+    clarify:            "Asking"
+    memory:             "Updating memory"
+    todo:               "Updating tasks"
+    connector_for:      " for "
+
+  wait:
+    recovery_auto_reconnect:  "; auto-reconnect at {secs}s"
+    no_response:              "⏳ waiting on {model} — {secs}s with no response yet (provider may be slow or overloaded{recovery})"
+    no_output:                "⏳ waiting on {model} — {secs}s with no output yet (provider may be slow or overloaded, or the model is thinking{recovery})"
+    no_first_byte:            "⚠️ No first byte from provider in {secs}s (codex stream, model: {model}). Reconnecting."
+    no_first_byte_hint:       "⚠️ No first byte from provider in {secs}s (codex stream, model: {model}). Reconnecting. {hint}"
+    no_response_reconnecting: "⚠ no response from provider in {secs}s — reconnecting..."
+    no_response_for:          "⚠️ No response from provider for {secs}s (model: {model}, context: ~{ctx} tokens). Reconnecting..."
+
   agents:
     header:                "🤖 **الوكلاء والمهام النشطة**"
     active_agents:         "**الوكلاء النشطون:** {count}"

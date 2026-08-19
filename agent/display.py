@@ -690,6 +690,28 @@ def get_friendly_tool_labels() -> bool:
     return _friendly_tool_labels
 
 
+def _localized_tool_verb(tool_name: str) -> str | None:
+    """Resolve a built-in tool's verb, localized via the i18n catalog.
+
+    Falls back to the English ``_TOOL_VERBS`` value when no translation exists
+    (missing key → ``t`` returns the dotted key path, which we detect and
+    ignore).  The English dict stays the source of truth for *which* tools have
+    a curated verb and for the connector/no-preview membership sets.
+    """
+    raw = _TOOL_VERBS.get(tool_name)
+    if raw is None:
+        return None
+    try:
+        from agent.i18n import t
+
+        localized = t(f"gateway.tool_verbs.{tool_name}")
+        if localized and not localized.startswith("gateway.tool_verbs."):
+            return localized
+    except Exception:
+        pass
+    return raw
+
+
 def get_tool_verb(tool_name: str) -> str | None:
     """Return the friendly verb for a built-in tool, or None.
 
@@ -700,12 +722,26 @@ def get_tool_verb(tool_name: str) -> str | None:
     """
     if not _friendly_tool_labels:
         return None
-    return _TOOL_VERBS.get(tool_name)
+    return _localized_tool_verb(tool_name)
 
 
 def tool_verb_connector(tool_name: str) -> str:
-    """Return the connector between a verb and its preview (" for " or " ")."""
-    return " for " if tool_name in _TOOL_VERBS_FOR_CONNECTOR else " "
+    """Return the connector between a verb and its preview (" for " or " ").
+
+    Localized via the i18n catalog so non-English catalogs can pick a joiner
+    that reads naturally (e.g. ``": "``); falls back to the English ``" for "``.
+    """
+    if tool_name not in _TOOL_VERBS_FOR_CONNECTOR:
+        return " "
+    try:
+        from agent.i18n import t
+
+        connector = t("gateway.tool_verbs.connector_for")
+        if connector and not connector.startswith("gateway.tool_verbs."):
+            return connector
+    except Exception:
+        pass
+    return " for "
 
 
 def verb_drops_preview(tool_name: str) -> bool:
@@ -771,7 +807,7 @@ def build_tool_label(tool_name: str, args: dict, max_len: int | None = None) -> 
     if not _friendly_tool_labels:
         return build_tool_preview(tool_name, args, max_len=max_len)
 
-    verb = _TOOL_VERBS.get(tool_name)
+    verb = _localized_tool_verb(tool_name)
     if not verb:
         return build_tool_preview(tool_name, args, max_len=max_len)
 
@@ -781,9 +817,7 @@ def build_tool_label(tool_name: str, args: dict, max_len: int | None = None) -> 
     preview = build_tool_preview(tool_name, args, max_len=max_len)
     if not preview:
         return verb
-    if tool_name in _TOOL_VERBS_FOR_CONNECTOR:
-        return f"{verb} for {preview}"
-    return f"{verb} {preview}"
+    return f"{verb}{tool_verb_connector(tool_name)}{preview}"
 
 
 # =========================================================================

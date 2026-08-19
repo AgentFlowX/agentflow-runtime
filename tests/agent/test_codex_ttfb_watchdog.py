@@ -184,6 +184,8 @@ def test_wait_notice_omits_reconnect_when_all_deadlines_are_non_finite(
 
 def test_moa_heartbeat_survives_infinite_stale_timeout(monkeypatch):
     """The full 100-poll MoA heartbeat must leave a healthy call running."""
+    # Wait notices are localized via i18n; pin the English wording contract.
+    monkeypatch.setenv("HERMES_LANGUAGE", "en")
     from agent import chat_completion_helpers as h
 
     notices: list[str] = []

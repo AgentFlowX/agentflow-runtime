@@ -71,6 +71,8 @@ def test_nonstream_wait_loop_emits_explained_notice(tmp_path, monkeypatch):
     deadline) instead of a bare 'waiting for non-streaming response'."""
     from agent import chat_completion_helpers as h
 
+    # Wait notices are localized via i18n; pin the English wording contract.
+    monkeypatch.setenv("HERMES_LANGUAGE", "en")
     seen: list = []
     agent = _make_agent(tmp_path, monkeypatch, thinking_callback=seen.append)
     agent.api_mode = "codex_responses"
