@@ -6128,11 +6128,26 @@ class TelegramAdapter(BasePlatformAdapter):
             return SendResult(success=False, error=_redact_telegram_error_text(e))
 
     # Template attrs for the shared _format_exec_approval core (HTML mode).
-    _EA_HEADER = "⚠️ <b>Command Approval Required</b>\n\n"
+    # HEADER / REASON_LABEL / SMART_DENY_LINE are i18n-localized via properties
+    # so the approval prompt renders in the gateway's display.language.
     _EA_CODE_OPEN = "<pre>"
     _EA_CODE_CLOSE = "</pre>\n\n"
-    _EA_SMART_DENY_LINE = "\n\n<b>Smart DENY:</b> owner override applies to this one operation only."
     _EA_CMD_BUDGET = 3800
+
+    @property
+    def _EA_HEADER(self) -> str:
+        from agent.i18n import t
+        return t("gateway.approval_prompt.header")
+
+    @property
+    def _EA_REASON_LABEL(self) -> str:
+        from agent.i18n import t
+        return t("gateway.approval_prompt.reason_label")
+
+    @property
+    def _EA_SMART_DENY_LINE(self) -> str:
+        from agent.i18n import t
+        return t("gateway.approval_prompt.smart_deny_line")
 
     def _ea_escape(self, text: str) -> str:
         return _html.escape(text)
@@ -6167,18 +6182,19 @@ class TelegramAdapter(BasePlatformAdapter):
                 self._approval_counter = itertools.count(1)
             approval_id = next(self._approval_counter)
 
+            from agent.i18n import t
             buttons = [
-                InlineKeyboardButton("✅ Allow Once", callback_data=f"ea:once:{approval_id}")
+                InlineKeyboardButton(t("gateway.approval_prompt.btn_allow_once"), callback_data=f"ea:once:{approval_id}")
             ]
             if not smart_denied and allow_session:
                 buttons.append(
-                    InlineKeyboardButton("✅ Session", callback_data=f"ea:session:{approval_id}")
+                    InlineKeyboardButton(t("gateway.approval_prompt.btn_session"), callback_data=f"ea:session:{approval_id}")
                 )
                 if allow_permanent:
                     buttons.append(
-                        InlineKeyboardButton("✅ Always", callback_data=f"ea:always:{approval_id}")
+                        InlineKeyboardButton(t("gateway.approval_prompt.btn_always"), callback_data=f"ea:always:{approval_id}")
                     )
-            buttons.append(InlineKeyboardButton("❌ Deny", callback_data=f"ea:deny:{approval_id}"))
+            buttons.append(InlineKeyboardButton(t("gateway.approval_prompt.btn_deny"), callback_data=f"ea:deny:{approval_id}"))
             # Pair into rows (2x2 for the full set) so labels stay readable on
             # mobile — a single 4-button row truncates to "Allo… / Ses… / …".
             rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
@@ -6224,13 +6240,14 @@ class TelegramAdapter(BasePlatformAdapter):
         try:
             preview = self.format_message(self._truncate_preview(message, 3800))
 
+            from agent.i18n import t
             keyboard = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("✅ Approve Once", callback_data=f"sc:once:{confirm_id}"),
-                    InlineKeyboardButton("🔒 Always Approve", callback_data=f"sc:always:{confirm_id}"),
+                    InlineKeyboardButton(t("gateway.approval_prompt.btn_approve_once"), callback_data=f"sc:once:{confirm_id}"),
+                    InlineKeyboardButton(t("gateway.approval_prompt.btn_always_approve"), callback_data=f"sc:always:{confirm_id}"),
                 ],
                 [
-                    InlineKeyboardButton("❌ Cancel", callback_data=f"sc:cancel:{confirm_id}"),
+                    InlineKeyboardButton(t("gateway.approval_prompt.btn_cancel"), callback_data=f"sc:cancel:{confirm_id}"),
                 ],
             ])
 
@@ -7022,6 +7039,7 @@ class TelegramAdapter(BasePlatformAdapter):
         self, update: "Update", context: "ContextTypes.DEFAULT_TYPE"
     ) -> None:
         """Handle inline keyboard button clicks."""
+        from agent.i18n import t
         query = update.callback_query
         if not query or not query.data:
             return
@@ -7067,7 +7085,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 try:
                     approval_id = int(parts[2])
                 except (ValueError, IndexError):
-                    await query.answer(text="Invalid approval data.")
+                    await query.answer(text=t("gateway.approval_prompt.toast_invalid_data"))
                     return
 
                 # Only authorized users may click approval buttons.
@@ -7079,12 +7097,12 @@ class TelegramAdapter(BasePlatformAdapter):
                     thread_id=str(query_thread_id) if query_thread_id is not None else None,
                     user_name=query_user_name,
                 ):
-                    await query.answer(text="⛔ You are not authorized to approve commands.")
+                    await query.answer(text=t("gateway.approval_prompt.toast_unauthorized_approve"))
                     return
 
                 session_key = self._approval_state.pop(approval_id, None)
                 if not session_key:
-                    await query.answer(text="This approval has already been resolved.")
+                    await query.answer(text=t("gateway.approval_prompt.toast_already_resolved_approval"))
                     return
 
                 user_display = getattr(query.from_user, "first_name", "User")
@@ -7109,12 +7127,12 @@ class TelegramAdapter(BasePlatformAdapter):
                 if count:
                     # Map choice to human-readable label
                     label_map = {
-                        "once": "✅ Approved once",
-                        "session": "✅ Approved for session",
-                        "always": "✅ Approved permanently",
-                        "deny": "❌ Denied",
+                        "once": t("gateway.approval_prompt.toast_approved_once"),
+                        "session": t("gateway.approval_prompt.toast_approved_session"),
+                        "always": t("gateway.approval_prompt.toast_approved_always"),
+                        "deny": t("gateway.approval_prompt.toast_denied"),
                     }
-                    label = label_map.get(choice, "Resolved")
+                    label = label_map.get(choice, t("gateway.approval_prompt.toast_resolved"))
                     edit_text = f"{label} by {user_display}"
                 else:
                     label = "⌛ Approval expired"
@@ -7159,21 +7177,21 @@ class TelegramAdapter(BasePlatformAdapter):
                     thread_id=str(query_thread_id) if query_thread_id is not None else None,
                     user_name=query_user_name,
                 ):
-                    await query.answer(text="⛔ You are not authorized to answer this prompt.")
+                    await query.answer(text=t("gateway.approval_prompt.toast_unauthorized_answer"))
                     return
 
                 session_key = self._slash_confirm_state.pop(confirm_id, None)
                 if not session_key:
-                    await query.answer(text="This prompt has already been resolved.")
+                    await query.answer(text=t("gateway.approval_prompt.toast_already_resolved_prompt"))
                     return
 
                 label_map = {
-                    "once": "✅ Approved once",
-                    "always": "🔒 Always approve",
-                    "cancel": "❌ Cancelled",
+                    "once": t("gateway.approval_prompt.toast_approved_once"),
+                    "always": t("gateway.approval_prompt.toast_always_approve"),
+                    "cancel": t("gateway.approval_prompt.toast_cancelled"),
                 }
                 user_display = getattr(query.from_user, "first_name", "User")
-                label = label_map.get(choice, "Resolved")
+                label = label_map.get(choice, t("gateway.approval_prompt.toast_resolved"))
 
                 await query.answer(text=label)
 
@@ -7259,12 +7277,12 @@ class TelegramAdapter(BasePlatformAdapter):
                     thread_id=str(query_thread_id) if query_thread_id is not None else None,
                     user_name=query_user_name,
                 ):
-                    await query.answer(text="⛔ You are not authorized to answer this prompt.")
+                    await query.answer(text=t("gateway.approval_prompt.toast_unauthorized_answer"))
                     return
 
                 session_key = self._clarify_state.get(clarify_id)
                 if not session_key:
-                    await query.answer(text="This prompt has already been resolved.")
+                    await query.answer(text=t("gateway.approval_prompt.toast_already_resolved_prompt"))
                     return
 
                 user_display = getattr(query.from_user, "first_name", "User")
