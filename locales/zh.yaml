@@ -230,6 +230,9 @@ gateway:
     toast_cancelled:                 "❌ Cancelled"
     toast_resolved:                  "Resolved"
 
+  self_improvement:
+    review: "💾 Self-improvement review: {summary}"
+
   agents:
     header:                "🤖 **活跃代理与任务**"
     active_agents:         "**活跃代理：** {count}"

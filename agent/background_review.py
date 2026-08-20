@@ -1041,15 +1041,13 @@ def _run_review_in_thread(
 
         if actions:
             summary = " · ".join(dict.fromkeys(actions))
-            agent._safe_print(
-                f"  💾 Self-improvement review: {summary}"
-            )
+            from agent.i18n import t as _i18n_t
+            _si = _i18n_t("gateway.self_improvement.review", summary=summary)
+            agent._safe_print("  " + _si)
             _bg_cb = agent.background_review_callback
             if _bg_cb:
                 try:
-                    _bg_cb(
-                        f"💾 Self-improvement review: {summary}"
-                    )
+                    _bg_cb(_si)
                 except Exception:
                     pass
 
