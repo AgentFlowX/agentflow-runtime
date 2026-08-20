@@ -423,6 +423,16 @@ _GATEWAY_AUTH_ERROR_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A blocked/over-budget scoped key comes back as a 401 (so it would otherwise read
+# as "authentication failed"). Detect the out-of-tokens case FIRST and show the user
+# a plain "top up" message instead of a scary credentials error.
+_GATEWAY_BUDGET_RE = re.compile(
+    r"(is\s+blocked|key\s+[^\n]*blocked|blocked\s+key|exceeded[^\n]*budget"
+    r"|budget[^\n]*exceeded|crossed\s+spend|budget_exceeded|no_tokens"
+    r"|out\s+of\s+tokens|insufficient[^\n]*(?:token|balance|credit))",
+    re.IGNORECASE,
+)
+
 _GATEWAY_RATE_LIMIT_RE = re.compile(
     r"(rate\s+limit|rate-limited|\b429\b|quota|usage\s+limit)",
     re.IGNORECASE,
@@ -707,6 +717,11 @@ def _format_exec_approval_fallback(
 
 def _gateway_provider_error_reply(text: str) -> str:
     """Map raw provider/API errors to a short user-safe Telegram reply."""
+    if _GATEWAY_BUDGET_RE.search(text):
+        return (
+            "💳 Закончились токены на балансе — поэтому я сейчас не могу ответить.\n"
+            "Пополни баланс, и я сразу продолжу: в меню бота нажми «💎 Баланс» → «➕ Пополнить»."
+        )
     if _GATEWAY_AUTH_ERROR_RE.search(text):
         return (
             "⚠️ Provider authentication failed. Check the configured credentials; "
@@ -842,7 +857,11 @@ def _prepare_gateway_status_message(platform: Any, event_type: str, message: str
         ):
             return None
     if _looks_like_gateway_provider_error(text):
-        return _gateway_provider_error_reply(text)
+        # The SAME provider error is also delivered as the turn's final_response
+        # (see the reply-filter path above), so emitting it here as a status message
+        # too double-posts it to chat. Suppress the status-stream copy — the
+        # final_response is the authoritative single delivery.
+        return None
     return text
 
 
