@@ -20,6 +20,7 @@ import { DesktopInstallOverlay } from '@/components/desktop-install-overlay'
 import { FindBar } from '@/components/find-bar'
 import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overlay'
 import { NotificationStack } from '@/components/notifications'
+import { AgentFlowAuthGate } from '@/components/agentflow-auth-gate'
 import { DesktopOnboardingOverlay } from '@/components/onboarding'
 import { $newSessionTabAction, registerPaneCloser } from '@/components/pane-shell/tree/store'
 import { FloatingPet } from '@/components/pet/floating-pet'
@@ -1048,6 +1049,12 @@ export function ContribWiring({ children }: { children: ReactNode }) {
         )}
         {children}
       </div>
+
+      {/* MANDATORY AgentFlow auth gate — renders FIRST (z-top), blocks the whole
+          app until the user is signed in. Independent of provider onboarding. */}
+      {!isAuxiliaryWindow() && (
+        <AgentFlowAuthGate profile={activeGatewayProfile} requestGateway={requestGateway} />
+      )}
 
       {/* The full real overlay set (mirrors DesktopController's `overlays`). */}
       <RemoteDisplayBanner />
