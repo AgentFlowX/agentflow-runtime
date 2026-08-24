@@ -19459,32 +19459,35 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 "Briefly introduce yourself and mention that /help shows available commands. "
                 "Keep the introduction concise -- one or two sentences max.]"
             )
-            # Opt-in structured profile-build path. When enabled (default
-            # "ask") and not yet offered on this install, swap the plain intro
-            # for a consent-gated directive that offers to build a user
-            # profile and persists confirmed facts via memory(target="user").
-            # The offer fires at most once (onboarding.seen flag); set
-            # onboarding.profile_build: off in config.yaml to disable.
+            # First-run setup path. When enabled (default "ask") and not yet
+            # offered on this install, swap the plain intro for a light,
+            # one-message, skippable directive that — instead of re-introducing
+            # the agent (the boot-greet already welcomed the user out of band) —
+            # confirms the few things that make it more useful to a non-technical
+            # owner (how to address them, their main task/business, language) and
+            # persists answers via memory(target="user"). Fires at most once
+            # (onboarding.seen flag); set onboarding.profile_build: off in
+            # config.yaml to fall back to the plain one-line intro.
             try:
                 from agent.onboarding import (
-                    PROFILE_BUILD_FLAG,
+                    FIRST_RUN_SETUP_FLAG,
                     is_seen,
                     mark_seen,
-                    profile_build_directive,
+                    first_run_setup_directive,
                     profile_build_mode,
                 )
                 _onb_cfg = _load_gateway_config()
                 if (
                     profile_build_mode(_onb_cfg) == "ask"
-                    and not is_seen(_onb_cfg, PROFILE_BUILD_FLAG)
+                    and not is_seen(_onb_cfg, FIRST_RUN_SETUP_FLAG)
                 ):
-                    turn_sidecar_notes.append(profile_build_directive().strip())
-                    mark_seen(_hermes_home / "config.yaml", PROFILE_BUILD_FLAG)
+                    turn_sidecar_notes.append(first_run_setup_directive().strip())
+                    mark_seen(_hermes_home / "config.yaml", FIRST_RUN_SETUP_FLAG)
                 else:
                     turn_sidecar_notes.append(_intro_note)
             except Exception as _pb_err:
                 logger.debug(
-                    "Profile-build onboarding directive failed, using plain intro: %s",
+                    "First-run setup onboarding directive failed, using plain intro: %s",
                     _pb_err,
                 )
                 turn_sidecar_notes.append(_intro_note)

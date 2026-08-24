@@ -27,6 +27,7 @@ BUSY_INPUT_FLAG = "busy_input_prompt"
 TOOL_PROGRESS_FLAG = "tool_progress_prompt"
 OPENCLAW_RESIDUE_FLAG = "openclaw_residue_cleanup"
 PROFILE_BUILD_FLAG = "profile_build_offered"
+FIRST_RUN_SETUP_FLAG = "first_run_setup_offered"
 
 
 # -------------------------------------------------------------------------
@@ -196,6 +197,40 @@ def profile_build_directive() -> str:
     )
 
 
+def first_run_setup_directive() -> str:
+    """System-note directive for the user's first-ever message.
+
+    A boot welcome message (listing what the agent can do) is already delivered
+    out of band by the deployment wrapper (entrypoint.sh boot-greet), so this
+    directive tells the agent NOT to re-introduce itself. Instead it runs a
+    light, one-message, skippable confirmation of the few settings that actually
+    make the agent more useful to a non-technical business owner — how to
+    address them, what their main task / business is, and their preferred
+    language — then persists durable answers to the user-profile memory store
+    (``memory`` tool, ``target="user"``). Deliberately NOT a profile
+    investigation: no web lookups and no reading connected accounts.
+    """
+    return (
+        "\n\n[System note: This is the user's very first message ever. A short "
+        "welcome message listing what you can do has ALREADY been delivered to "
+        "them out of band — do NOT introduce yourself again or re-list your "
+        "capabilities. Answer their message normally, and in the SAME reply add "
+        "a short, friendly setup written in the user's language (Russian by "
+        "default). In ONE brief message — never a form, never an interrogation, "
+        "at most three bullet points — invite them (clearly optional, e.g. "
+        "'можно пропустить') to tell you three things so you can tailor "
+        "yourself:\n"
+        "  1. how to address them (their name);\n"
+        "  2. what their main task or business is — what they do, sell, or want "
+        "help with;\n"
+        "  3. the language they prefer to work in.\n"
+        "Do NOT run any web search and do NOT read any connected accounts. When "
+        "they answer, save each durable fact with the memory tool using "
+        "target=\"user\" (compact, high-signal), then continue with their actual "
+        "request. Mention once that /help shows everything you can do.]"
+    )
+
+
 # -------------------------------------------------------------------------
 # State read / write
 # -------------------------------------------------------------------------
@@ -253,6 +288,7 @@ __all__ = [
     "TOOL_PROGRESS_FLAG",
     "OPENCLAW_RESIDUE_FLAG",
     "PROFILE_BUILD_FLAG",
+    "FIRST_RUN_SETUP_FLAG",
     "busy_input_hint_gateway",
     "busy_input_hint_cli",
     "tool_progress_hint_gateway",
@@ -261,6 +297,7 @@ __all__ = [
     "detect_openclaw_residue",
     "profile_build_mode",
     "profile_build_directive",
+    "first_run_setup_directive",
     "is_seen",
     "mark_seen",
 ]

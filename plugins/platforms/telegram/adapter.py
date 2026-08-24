@@ -890,6 +890,14 @@ class TelegramAdapter(BasePlatformAdapter):
         # Clarify button state: clarify_id → session_key (for the clarify tool's
         # multiple-choice prompts; see GatewayRunner clarify_callback wiring).
         self._clarify_state: Dict[str, str] = {}
+        # Stop-button state (🛑 Остановить inline button shown while a turn runs,
+        # opt-in via TELEGRAM_STOP_BUTTON). Two paired maps so both the
+        # completion hook (keyed by the inbound event) and the callback handler
+        # (keyed by the short callback token) can find + clean up the bubble.
+        #   event_key → {chat_id, message_id (working bubble), token}
+        self._stop_button_by_event: Dict[str, Dict[str, Any]] = {}
+        #   token → {source, event_key}  (source drives the synthesized /stop)
+        self._stop_button_by_token: Dict[str, Dict[str, Any]] = {}
         # Notification mode for message sends.
         # "important" — only final responses, approvals, and slash confirmations
         #               trigger notifications; tool progress, streaming, status
@@ -7065,6 +7073,72 @@ class TelegramAdapter(BasePlatformAdapter):
                 await self._handle_choice_picker_callback(query, data, chat_id)
             return
 
+        # --- Stop-button callbacks (stop:token) → SAME cancel path as /stop ---
+        if data.startswith("stop:"):
+            from agent.i18n import t
+            # Only authorized users may cancel a running turn.
+            caller_id = str(getattr(query.from_user, "id", ""))
+            if not self._is_callback_user_authorized(
+                caller_id,
+                chat_id=query_chat_id,
+                chat_type=str(query_chat_type) if query_chat_type is not None else None,
+                thread_id=str(query_thread_id) if query_thread_id is not None else None,
+                user_name=query_user_name,
+            ):
+                await query.answer(text=t("gateway.approval_prompt.toast_unauthorized_answer"))
+                return
+
+            token = data.split(":", 1)[1]
+            entry = self._stop_button_by_token.pop(token, None)
+            # Always strip the button so a stale tap can't linger.
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+            if not entry:
+                # Turn already finished / stopped elsewhere.
+                await query.answer(text="Уже остановлено")
+                return
+            # Drop the paired event→bubble entry so the completion hook doesn't
+            # double-handle it (we delete the bubble ourselves below).
+            self._stop_button_by_event.pop(entry.get("event_key", ""), None)
+
+            # Answer WITHIN the ~15s window BEFORE the (possibly slow) interrupt.
+            await query.answer(text="Останавливаю…")
+
+            # Dispatch a synthesized /stop through the SAME public entrypoint a
+            # real typed /stop uses (self.handle_message) — NOT the runner-side
+            # _message_handler. This re-enters the serialized busy-session cancel
+            # path (_dispatch_active_session_command → _busy_stop_command →
+            # _interrupt_and_clear_session) AND actually sends the "⚡ Остановлено"
+            # confirmation the runner returns. Using the stored inbound source
+            # guarantees the SAME session_key as the running turn.
+            source = entry.get("source")
+            handler = getattr(self, "handle_message", None)
+            if source is not None and callable(handler):
+                stop_event = MessageEvent(
+                    text="/stop",
+                    message_type=MessageType.TEXT,
+                    source=source,
+                    user_id=getattr(source, "user_id", None),
+                    user_name=getattr(source, "user_name", None),
+                )
+                try:
+                    await handler(stop_event)
+                except Exception as exc:
+                    logger.warning("[%s] stop-button dispatch failed: %s", self.name, exc)
+
+            # Delete the now-buttonless working bubble (the /stop path posts its
+            # own confirmation).
+            try:
+                if query.message is not None:
+                    await self.delete_message(
+                        str(query.message.chat_id), str(query.message.message_id)
+                    )
+            except Exception:
+                pass
+            return
+
         # --- Gmail-triage callbacks (gt:verb:arg) ---
         if data.startswith("gt:"):
             await self._handle_gmail_triage_callback(
@@ -10604,14 +10678,103 @@ class TelegramAdapter(BasePlatformAdapter):
             logger.debug("[%s] clear reactions failed: %s", self.name, _redact_telegram_error_text(e))
             return False
 
-    async def on_processing_start(self, event: MessageEvent) -> None:
-        """Add an in-progress reaction when message processing begins."""
-        if not self._reactions_enabled():
+    # ── Stop button (🛑 Остановить) — cancels the running turn like /stop ────
+
+    def _stop_button_enabled(self) -> bool:
+        """Whether to post a 🛑 Остановить inline button while a turn runs.
+
+        Opt-in (default off), mirroring TELEGRAM_REACTIONS — a fresh bubble on
+        every turn is more intrusive than a reaction, so deployments enable it
+        explicitly (env or config.yaml display.platforms.telegram.stop_button).
+        """
+        return os.getenv("TELEGRAM_STOP_BUTTON", "false").lower() not in {"false", "0", "no", ""}
+
+    @staticmethod
+    def _stop_event_key(event: "MessageEvent") -> Optional[str]:
+        """Stable key for one inbound turn, shared by start/complete hooks.
+
+        The SAME MessageEvent instance is passed to on_processing_start and
+        on_processing_complete, so keying on (chat, thread, message) pairs the
+        posted bubble with its removal.
+        """
+        source = getattr(event, "source", None)
+        chat_id = getattr(source, "chat_id", None)
+        message_id = getattr(event, "message_id", None)
+        if not (chat_id and message_id):
+            return None
+        thread_id = getattr(source, "thread_id", None)
+        return f"{chat_id}:{thread_id}:{message_id}"
+
+    async def _post_stop_button(self, event: "MessageEvent") -> None:
+        """Post a lightweight working bubble carrying a 🛑 Остановить button.
+
+        Best-effort: any failure is swallowed so it can never break a turn.
+        Works in DMs and forum topics (thread routing via
+        _thread_kwargs_for_send). Tapping the button dispatches a synthesized
+        ``/stop`` through the same runner path as a typed /stop — see the
+        ``stop:`` branch in _handle_callback_query.
+        """
+        if not self._bot or not self._stop_button_enabled():
             return
+        event_key = self._stop_event_key(event)
+        if not event_key:
+            return
+        source = event.source
+        chat_id = getattr(source, "chat_id", None)
+        thread_id = getattr(source, "thread_id", None)
+        try:
+            import itertools
+            if not hasattr(self, "_stop_counter"):
+                self._stop_counter = itertools.count(1)
+            token = str(next(self._stop_counter))  # short (<64B callback_data)
+            keyboard = InlineKeyboardMarkup(
+                [[InlineKeyboardButton("🛑 Остановить", callback_data=f"stop:{token}")]]
+            )
+            kwargs: Dict[str, Any] = {
+                "chat_id": normalize_telegram_chat_id(chat_id),
+                "text": "⏳ Работаю…",
+                "reply_markup": keyboard,
+                **self._thread_kwargs_for_send(chat_id, thread_id),
+            }
+            msg = await self._send_message_with_thread_fallback(**kwargs)
+            self._stop_button_by_event[event_key] = {
+                "chat_id": str(chat_id),
+                "message_id": str(msg.message_id),
+                "token": token,
+            }
+            self._stop_button_by_token[token] = {
+                "source": source,
+                "event_key": event_key,
+            }
+        except Exception as e:
+            logger.debug("[%s] post stop button failed: %s", self.name, _redact_telegram_error_text(e))
+
+    async def _remove_stop_button(self, event: "MessageEvent") -> None:
+        """Delete the working bubble + drop stop-button state (best-effort).
+
+        Fires for every outcome (SUCCESS/FAILURE/CANCELLED), so the button
+        self-heals on /stop too — the CANCELLED path routes here. A no-op when
+        the callback handler already consumed the entry (double-handle safe).
+        """
+        event_key = self._stop_event_key(event)
+        if not event_key:
+            return
+        entry = self._stop_button_by_event.pop(event_key, None)
+        if not entry:
+            return
+        self._stop_button_by_token.pop(entry.get("token", ""), None)
+        try:
+            await self.delete_message(entry["chat_id"], entry["message_id"])
+        except Exception as e:
+            logger.debug("[%s] remove stop button failed: %s", self.name, _redact_telegram_error_text(e))
+
+    async def on_processing_start(self, event: MessageEvent) -> None:
+        """Mark a turn in-progress: 👀 reaction (opt-in) + 🛑 stop button (opt-in)."""
         chat_id = getattr(event.source, "chat_id", None)
         message_id = getattr(event, "message_id", None)
-        if chat_id and message_id:
+        if self._reactions_enabled() and chat_id and message_id:
             await self._set_reaction(chat_id, message_id, "\U0001f440")
+        await self._post_stop_button(event)
 
     async def on_processing_complete(self, event: MessageEvent, outcome: ProcessingOutcome) -> None:
         """Swap the in-progress reaction for a final success/failure reaction.
@@ -10626,6 +10789,9 @@ class TelegramAdapter(BasePlatformAdapter):
         another agent run to swap it to 👍/👎 — which never happens if the
         cancellation was the last activity in the chat.
         """
+        # Remove the 🛑 working bubble first, independent of the reactions
+        # toggle (the two features are gated separately).
+        await self._remove_stop_button(event)
         if not self._reactions_enabled():
             return
         chat_id = getattr(event.source, "chat_id", None)
@@ -10838,6 +11004,8 @@ def _apply_yaml_config(yaml_cfg: dict, telegram_cfg: dict) -> dict | None:
             os.environ["TELEGRAM_IGNORED_THREADS"] = str(ignored_threads)
     if "reactions" in telegram_cfg and not os.getenv("TELEGRAM_REACTIONS"):
         os.environ["TELEGRAM_REACTIONS"] = str(telegram_cfg["reactions"]).lower()
+    if "stop_button" in telegram_cfg and not os.getenv("TELEGRAM_STOP_BUTTON"):
+        os.environ["TELEGRAM_STOP_BUTTON"] = str(telegram_cfg["stop_button"]).lower()
     if "proxy_url" in telegram_cfg and not os.getenv("TELEGRAM_PROXY"):
         os.environ["TELEGRAM_PROXY"] = str(telegram_cfg["proxy_url"]).strip()
     _telegram_extra = telegram_cfg.get("extra") if isinstance(telegram_cfg.get("extra"), dict) else {}
