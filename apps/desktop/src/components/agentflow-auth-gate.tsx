@@ -1,7 +1,7 @@
 import { useStore } from '@nanostores/react'
 import { type CSSProperties, useEffect, useState } from 'react'
 
-import { getCpJwt } from '@/lib/cp-auth'
+import { CpError, clearCpJwt, cpMe, getCpJwt, hydrateCpJwtFromMain } from '@/lib/cp-auth'
 import { $desktopBoot } from '@/store/boot'
 import { $gatewayState } from '@/store/session'
 import { completeAgentFlowTelegramLogin, loginAgentFlow, type OnboardingContext } from '@/store/onboarding'
@@ -84,6 +84,39 @@ export function AgentFlowAuthGate({ profile, requestGateway }: AgentFlowAuthGate
   const boot = useStore($desktopBoot)
   const gatewayState = useStore($gatewayState)
   const ready = gatewayState === 'open'
+
+  // Validate a stored session on boot. The initial `authed` only trusts token
+  // PRESENCE — a stale/expired/revoked JWT would still skip login and then 401
+  // on every account call. So: hydrate from the keychain, then verify via
+  // GET /v1/me. On a real auth rejection, wipe the token and show login. On a
+  // transport error we keep the optimistic session so an offline user isn't
+  // locked out. A valid returning user never sees the form flash.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const token = getCpJwt() ?? (await hydrateCpJwtFromMain())
+      if (!token) {
+        if (!cancelled) setAuthed(false)
+        return
+      }
+      try {
+        await cpMe(token)
+        // valid — stay authed (already optimistically true)
+      } catch (err) {
+        const status = err instanceof CpError ? err.status : -1
+        const code = err instanceof CpError ? err.code : ''
+        const rejected = status === 401 || status === 403 || code === 'unauthorized' || code === 'invalid_credentials'
+        if (rejected && !cancelled) {
+          clearCpJwt()
+          setAuthed(false)
+        }
+        // network/other: leave optimistic session intact
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Telegram login return path: capture the hermes://agentflow-auth?token=…
   // deep link, then finish exactly like email/password (issue key, point the

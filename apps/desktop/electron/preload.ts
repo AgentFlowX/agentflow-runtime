@@ -167,7 +167,8 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     cpFetch: payload => ipcRenderer.invoke('agentflow:cpFetch', payload),
     cpTokenGet: () => ipcRenderer.invoke('agentflow:cpToken:get'),
     cpTokenSet: token => ipcRenderer.invoke('agentflow:cpToken:set', token),
-    cpTokenClear: () => ipcRenderer.invoke('agentflow:cpToken:clear')
+    cpTokenClear: () => ipcRenderer.invoke('agentflow:cpToken:clear'),
+    provisionImageGen: () => ipcRenderer.invoke('agentflow:provisionImageGen')
   },
   api: request => ipcRenderer.invoke('hermes:api', request),
   notify: payload => ipcRenderer.invoke('hermes:notify', payload),

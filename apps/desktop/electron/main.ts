@@ -11992,6 +11992,47 @@ ipcMain.handle('agentflow:cpToken:clear', async () => {
   return { ok: true }
 })
 
+// ── gpt-image provisioning (desktop's equivalent of the cloud entrypoint) ────
+// The runtime is IDENTICAL for cloud agents and this desktop app (same
+// AgentFlowX/agentflow-runtime code, same image_gen plugins). What differs is
+// the STARTUP wrapper that configures the runtime before it launches:
+//   • Cloud: agentflow/deploy/hermes-agent/render-config.py sets
+//     image_gen.provider=openai + model=gpt-image-2-medium in config.yaml, and
+//     entrypoint.sh exports OPENAI_BASE_URL/OPENAI_API_KEY at the gateway — so
+//     the native `image_generate` tool runs gpt-image-2 through OUR gateway.
+//   • Desktop: THIS handler is that step. The renderer sets the two env vars via
+//     setEnvVar after login; here we ensure the config.yaml half.
+// Without an explicit provider the runtime's fallback picks `fal` (needs
+// FAL_KEY) and images fail — so this is REQUIRED for desktop image generation.
+// We only APPEND when no image_gen block exists (comment-preserving, idempotent)
+// and never override a provider the user already chose.
+ipcMain.handle('agentflow:provisionImageGen', async () => {
+  try {
+    const configPath = path.join(HERMES_HOME, 'config.yaml')
+    let text = ''
+    try {
+      text = fs.readFileSync(configPath, 'utf8')
+    } catch {
+      text = ''
+    }
+
+    // Respect an existing image_gen block (setdefault semantics like render-config).
+    if (/^\s*image_gen\s*:/m.test(text)) {
+      return { ok: true, changed: false }
+    }
+
+    const block = 'image_gen:\n  provider: openai\n  model: gpt-image-2-medium\n'
+    const next = text ? `${text.replace(/\n*$/, '\n')}\n${block}` : block
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    fs.writeFileSync(configPath, next, 'utf8')
+    rememberLog('[agentflow] provisioned image_gen.provider=openai in config.yaml')
+
+    return { ok: true, changed: true }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+})
+
 // ── v2 connection registry IPC (multi-source) ───────────────────────────────
 // Storage-level CRUD for named agent sources. Routing/pooling consumption of
 // the registry lands separately; these handlers only manage the persisted

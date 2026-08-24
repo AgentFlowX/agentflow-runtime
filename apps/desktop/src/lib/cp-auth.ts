@@ -71,6 +71,9 @@ interface CpDesktopBridge {
   cpTokenGet?: () => Promise<string | null>
   cpTokenSet?: (token: string) => Promise<unknown> | void
   cpTokenClear?: () => Promise<unknown> | void
+  /** Ensure image_gen.provider=openai in config.yaml (desktop's equivalent of
+   *  the cloud entrypoint's render-config step). Main writes the file. */
+  provisionImageGen?: () => Promise<{ ok: boolean; changed?: boolean; error?: string }>
 }
 function cpBridge(): CpDesktopBridge | undefined {
   return (window as unknown as { hermesDesktop?: { agentflow?: CpDesktopBridge } }).hermesDesktop?.agentflow
@@ -226,6 +229,20 @@ export async function hydrateCpJwtFromMain(): Promise<string | null> {
     /* ignore */
   }
   return null
+}
+
+/**
+ * Ask the Electron main process to ensure gpt-image is provisioned in the local
+ * runtime's config.yaml (image_gen.provider=openai). No-op (resolves ok) in a
+ * plain browser without the bridge. The env half (OPENAI_BASE_URL/KEY) is set
+ * separately via setEnvVar.
+ */
+export async function provisionDesktopImageGen(): Promise<void> {
+  try {
+    await cpBridge()?.provisionImageGen?.()
+  } catch {
+    /* non-fatal: chat still works; images just won't route until next login */
+  }
 }
 
 export function clearCpJwt(): void {

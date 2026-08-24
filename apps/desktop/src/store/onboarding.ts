@@ -11,7 +11,15 @@ import {
   submitOAuthCode,
   validateProviderCredential
 } from '@/hermes'
-import { cpAuthErrorRu, cpLogin, cpRegister, cpRotateKey, storeCpJwt } from '@/lib/cp-auth'
+import {
+  clearCpJwt,
+  cpAuthErrorRu,
+  cpLogin,
+  cpRegister,
+  cpRotateKey,
+  provisionDesktopImageGen,
+  storeCpJwt
+} from '@/lib/cp-auth'
 import { isProviderSetupErrorMessage } from '@/lib/provider-setup-errors'
 import { evaluateRuntimeReadiness, type RuntimeReadinessResult } from '@/lib/runtime-readiness'
 import { setMainModelAssignment } from '@/store/cron-model-impact'
@@ -555,18 +563,43 @@ export async function loginAgentFlow(
     const auth = register ? await cpRegister(mail, password) : await cpLogin(mail, password)
     storeCpJwt(auth.token)
 
-    const key = await cpRotateKey(auth.token)
+    let key
+    try {
+      key = await cpRotateKey(auth.token)
+    } catch (keyError) {
+      // The unified LLM key/wallet is anchored to a Telegram identity in the
+      // control-plane (rotateKey → no_identity when the account has no Telegram).
+      // A pure email/password account therefore has no key to provision — and
+      // we must NOT leave a valid session behind, or the auth gate would let the
+      // user into a keyless, non-working app on the next launch. Roll back.
+      clearCpJwt()
+      return { ok: false, message: provisionKeyErrorRu(keyError) }
+    }
+
     const baseUrl = key.baseUrl && /^https?:\/\//.test(key.baseUrl) ? key.baseUrl : 'https://llm.agentflow.website/v1'
     const raw = key.raw ?? ''
 
     if (!raw) {
+      clearCpJwt()
       return { ok: false, message: 'Сервер не выдал ключ доступа. Попробуй ещё раз.' }
     }
 
     return await saveOnboardingLocalEndpoint(baseUrl, raw, ctx)
   } catch (error) {
+    clearCpJwt()
     return { ok: false, message: cpAuthErrorRu(error) }
   }
+}
+
+/** Message for a failed key provisioning. The control-plane anchors the wallet
+ *  to Telegram, so the common failure is a pure-email account with no linked
+ *  Telegram identity — say so plainly and point at the Telegram path. */
+function provisionKeyErrorRu(err: unknown): string {
+  const code = (err as { code?: string })?.code
+  if (code === 'no_identity') {
+    return 'Этот аккаунт ещё не привязан к Telegram, а кошелёк и ключ доступа привязаны к Telegram. Войди через Telegram — этого достаточно.'
+  }
+  return cpAuthErrorRu(err)
 }
 
 /**
@@ -589,16 +622,25 @@ export async function completeAgentFlowTelegramLogin(
   try {
     storeCpJwt(jwt)
 
-    const key = await cpRotateKey(jwt)
+    let key
+    try {
+      key = await cpRotateKey(jwt)
+    } catch (keyError) {
+      clearCpJwt()
+      return { ok: false, message: provisionKeyErrorRu(keyError) }
+    }
+
     const baseUrl = key.baseUrl && /^https?:\/\//.test(key.baseUrl) ? key.baseUrl : 'https://llm.agentflow.website/v1'
     const raw = key.raw ?? ''
 
     if (!raw) {
+      clearCpJwt()
       return { ok: false, message: 'Сервер не выдал ключ доступа. Попробуй ещё раз.' }
     }
 
     return await saveOnboardingLocalEndpoint(baseUrl, raw, ctx)
   } catch (error) {
+    clearCpJwt()
     return { ok: false, message: cpAuthErrorRu(error) }
   }
 }
@@ -931,7 +973,12 @@ export async function saveOnboardingLocalEndpoint(baseUrl: string, apiKey: strin
       return { ok: false, message: probe.message || `Could not reach ${url}.` }
     }
 
-    model = (probe.models?.[0] ?? '').trim()
+    // Default to `auto` when the gateway offers it — it's the resilient router
+    // model (falls back across providers if one is down), which is what the
+    // AgentFlow gateway wants as the out-of-the-box choice. Fall back to the
+    // first advertised model for non-AgentFlow endpoints that have no `auto`.
+    const advertised = (probe.models ?? []).map(m => m.trim()).filter(Boolean)
+    model = (advertised.find(m => m.toLowerCase() === 'auto') ?? advertised[0] ?? '').trim()
   } catch {
     return { ok: false, message: `Could not reach ${url}.` }
   }
@@ -945,6 +992,21 @@ export async function saveOnboardingLocalEndpoint(baseUrl: string, apiKey: strin
 
   try {
     await setMainModelAssignment({ provider: 'custom', model, base_url: url, api_key: key })
+
+    // Provision gpt-image on OUR gateway — same result the cloud entrypoint gives
+    // agents. The native `image_generate` tool's openai plugin drives gpt-image-2
+    // through the OpenAI SDK, which honours OPENAI_BASE_URL; point it at the
+    // gateway with the unified key (metered in the token-economy). config.yaml's
+    // image_gen.provider=openai is written by the main process (setEnvVar can't
+    // set it, and the runtime's fallback would otherwise pick `fal`). Skipped for
+    // third-party/local endpoints that don't serve gpt-image-2.
+    if (key && /agentflow\.website|codex\.sale|codexsale/i.test(url)) {
+      const imageBase = /\/v\d+$/.test(url) ? url : `${url.replace(/\/+$/, '')}/v1`
+      await setEnvVar('OPENAI_BASE_URL', imageBase).catch(() => undefined)
+      await setEnvVar('OPENAI_API_KEY', key).catch(() => undefined)
+      await provisionDesktopImageGen()
+    }
+
     await ctx.requestGateway('reload.env').catch(() => undefined)
 
     const runtime = await checkRuntime(ctx)
