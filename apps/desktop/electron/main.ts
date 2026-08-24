@@ -11897,6 +11897,101 @@ ipcMain.handle('hermes:ssh-config:resolve', async (_event, host) => {
 })
 ipcMain.handle('hermes:connection-config:test', async (_event, payload) => testDesktopConnectionConfig(payload))
 
+// ── AgentFlow control-plane bridge (CORS-free) ──────────────────────────────
+// The renderer's CP auth/account calls (src/lib/cp-auth.ts) cannot fetch
+// cp.agentflow.website directly: it's cross-origin and CP does not emit
+// Access-Control-Allow-Origin, so Chromium blocks the response. We proxy the
+// request through MAIN (`electronNet.fetch`, Node stack — no CORS) and hand back
+// { ok, status, data }. This rejects ONLY on a genuine transport failure; an
+// HTTP error (401 bad creds, 409 email_taken, …) resolves with ok:false so the
+// renderer maps it to the right Russian message instead of "нет связи".
+ipcMain.handle('agentflow:cpFetch', async (_event, payload) => {
+  const url = String((payload && payload.url) || '')
+  let parsed
+  try {
+    parsed = new URL(url)
+  } catch {
+    return { ok: false, status: 0, data: { error: { code: 'network', message: 'Invalid URL' } } }
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    return { ok: false, status: 0, data: { error: { code: 'network', message: 'Unsupported protocol' } } }
+  }
+
+  const method = String((payload && payload.method) || 'GET').toUpperCase()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' }
+
+  if (payload && payload.token) {
+    headers.Authorization = `Bearer ${String(payload.token)}`
+  }
+
+  const body = payload && typeof payload.body === 'string' ? payload.body : undefined
+
+  // Throws on transport failure → the IPC invoke rejects → renderer catch maps
+  // it to CpError('network').
+  const res = await electronNet.fetch(url, {
+    method,
+    headers,
+    body,
+    credentials: 'omit',
+    bypassCustomProtocolHandlers: true
+  })
+
+  let data = null
+  const text = await res.text()
+
+  if (text) {
+    try {
+      data = JSON.parse(text)
+    } catch {
+      data = { raw: text }
+    }
+  }
+
+  return { ok: res.ok, status: res.status, data }
+})
+
+// JWT-at-rest for the AgentFlow session — encrypted via safeStorage (OS
+// keychain), co-located with the other desktop secrets under userData.
+function _cpTokenStorePath() {
+  return path.join(app.getPath('userData'), 'agentflow-cp-token.json')
+}
+ipcMain.handle('agentflow:cpToken:get', async () => {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(_cpTokenStorePath(), 'utf8'))
+    return decryptDesktopSecret(parsed) || null
+  } catch {
+    return null
+  }
+})
+ipcMain.handle('agentflow:cpToken:set', async (_event, token) => {
+  const value = String(token || '')
+
+  if (!value) {
+    return { ok: false }
+  }
+
+  try {
+    const secret = encryptDesktopSecret(value)
+    fs.mkdirSync(path.dirname(_cpTokenStorePath()), { recursive: true })
+    fs.writeFileSync(_cpTokenStorePath(), JSON.stringify(secret), { mode: 0o600 })
+
+    return { ok: true }
+  } catch (err) {
+    rememberLog(`[agentflow] cpToken:set failed: ${err.message}`)
+
+    return { ok: false, error: String(err.message || err) }
+  }
+})
+ipcMain.handle('agentflow:cpToken:clear', async () => {
+  try {
+    fs.rmSync(_cpTokenStorePath(), { force: true })
+  } catch {
+    /* already gone */
+  }
+
+  return { ok: true }
+})
+
 // ── v2 connection registry IPC (multi-source) ───────────────────────────────
 // Storage-level CRUD for named agent sources. Routing/pooling consumption of
 // the registry lands separately; these handlers only manage the persisted

@@ -158,6 +158,17 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     get: () => ipcRenderer.invoke('hermes:profile:get'),
     set: name => ipcRenderer.invoke('hermes:profile:set', name)
   },
+  // AgentFlow control-plane bridge — the renderer's CP auth/account calls go
+  // through MAIN (Node `net`, no CORS) instead of a cross-origin renderer
+  // fetch() that cp.agentflow.website blocks (no Access-Control-Allow-Origin).
+  // cpFetch resolves { ok, status, data } for any HTTP response; cpToken* keep
+  // the JWT encrypted at rest in the OS keychain via safeStorage.
+  agentflow: {
+    cpFetch: payload => ipcRenderer.invoke('agentflow:cpFetch', payload),
+    cpTokenGet: () => ipcRenderer.invoke('agentflow:cpToken:get'),
+    cpTokenSet: token => ipcRenderer.invoke('agentflow:cpToken:set', token),
+    cpTokenClear: () => ipcRenderer.invoke('agentflow:cpToken:clear')
+  },
   api: request => ipcRenderer.invoke('hermes:api', request),
   notify: payload => ipcRenderer.invoke('hermes:notify', payload),
   requestMicrophoneAccess: () => ipcRenderer.invoke('hermes:requestMicrophoneAccess'),

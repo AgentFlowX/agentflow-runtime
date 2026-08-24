@@ -569,6 +569,40 @@ export async function loginAgentFlow(
   }
 }
 
+/**
+ * Telegram login completion — the OS browser finishes Telegram auth on the site
+ * and the site redirects back to the app via the `hermes://agentflow-auth?token=<JWT>`
+ * deep link, which the auth gate captures and hands here. The email/password
+ * step is skipped; from the JWT onward this mirrors loginAgentFlow exactly
+ * (store JWT → issue unified key → point the runtime at OUR gateway).
+ */
+export async function completeAgentFlowTelegramLogin(
+  token: string,
+  ctx: OnboardingContext
+): Promise<{ ok: boolean; message?: string }> {
+  const jwt = String(token || '').trim()
+
+  if (!jwt) {
+    return { ok: false, message: 'Telegram-вход не вернул токен. Попробуй ещё раз.' }
+  }
+
+  try {
+    storeCpJwt(jwt)
+
+    const key = await cpRotateKey(jwt)
+    const baseUrl = key.baseUrl && /^https?:\/\//.test(key.baseUrl) ? key.baseUrl : 'https://llm.agentflow.website/v1'
+    const raw = key.raw ?? ''
+
+    if (!raw) {
+      return { ok: false, message: 'Сервер не выдал ключ доступа. Попробуй ещё раз.' }
+    }
+
+    return await saveOnboardingLocalEndpoint(baseUrl, raw, ctx)
+  } catch (error) {
+    return { ok: false, message: cpAuthErrorRu(error) }
+  }
+}
+
 export async function refreshOnboarding(ctx: OnboardingContext) {
   // Manual mode (user opened the selector from a working app): never
   // auto-dismiss on runtime-ready — the whole point is to let them add /

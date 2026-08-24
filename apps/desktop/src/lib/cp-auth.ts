@@ -53,19 +53,65 @@ export class CpError extends Error {
   }
 }
 
+/* ---- Electron MAIN-process bridge (CORS-free CP transport) ----------------
+ * The Electron renderer is a Chromium page (origin app://… or http://127.0.0.1)
+ * so a direct fetch() to cp.agentflow.website is cross-origin — and CP does NOT
+ * emit Access-Control-Allow-Origin, so Chromium blocks the response and the
+ * fetch promise rejects ("Нет связи с сервером"). The Electron MAIN process
+ * (Node/`net`) has NO CORS restriction, so we route CP requests through it via
+ * the preload bridge (window.hermesDesktop.agentflow.cpFetch). We fall back to
+ * a direct fetch only in a plain browser (dev web dashboard, no bridge). */
+interface CpBridgeResponse {
+  ok: boolean
+  status: number
+  data: unknown
+}
+interface CpDesktopBridge {
+  cpFetch?: (p: { url: string; method: string; token?: string; body?: string }) => Promise<CpBridgeResponse>
+  cpTokenGet?: () => Promise<string | null>
+  cpTokenSet?: (token: string) => Promise<unknown> | void
+  cpTokenClear?: () => Promise<unknown> | void
+}
+function cpBridge(): CpDesktopBridge | undefined {
+  return (window as unknown as { hermesDesktop?: { agentflow?: CpDesktopBridge } }).hermesDesktop?.agentflow
+}
+
+function mapCpErrorBody(data: unknown, status: number): CpError {
+  const err = (data as { error?: { code?: string; message?: string } })?.error
+  return new CpError(String(err?.code ?? 'error'), String(err?.message ?? `HTTP ${status}`), status)
+}
+
 async function cpRequest<T>(
   path: string,
   init: { method?: string; token?: string; body?: unknown } = {}
 ): Promise<T> {
+  const url = cpUrl(path)
+  const method = init.method ?? 'GET'
+  const bodyStr = init.body === undefined ? undefined : JSON.stringify(init.body)
+
+  // Preferred path: Electron MAIN process — no CORS. cpFetch resolves with
+  // { ok, status, data } for any HTTP response (incl. 401) and only rejects on
+  // a genuine transport failure.
+  const bridge = cpBridge()
+  if (bridge?.cpFetch) {
+    let r: CpBridgeResponse
+    try {
+      r = await bridge.cpFetch({ url, method, token: init.token, body: bodyStr })
+    } catch {
+      throw new CpError('network', 'Нет связи с сервером. Проверь интернет.', 0)
+    }
+    if (!r.ok) {
+      throw mapCpErrorBody(r.data, r.status)
+    }
+    return r.data as T
+  }
+
+  // Fallback: plain browser (dev web) where same-origin / CORS is fine.
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (init.token) headers.Authorization = `Bearer ${init.token}`
   let res: Response
   try {
-    res = await fetch(cpUrl(path), {
-      method: init.method ?? 'GET',
-      headers,
-      body: init.body === undefined ? undefined : JSON.stringify(init.body)
-    })
+    res = await fetch(url, { method, headers, body: bodyStr })
   } catch {
     throw new CpError('network', 'Нет связи с сервером. Проверь интернет.', 0)
   }
@@ -76,8 +122,7 @@ async function cpRequest<T>(
     /* non-JSON */
   }
   if (!res.ok) {
-    const err = (data as { error?: { code?: string; message?: string } })?.error
-    throw new CpError(String(err?.code ?? 'error'), String(err?.message ?? `HTTP ${res.status}`), res.status)
+    throw mapCpErrorBody(data, res.status)
   }
   return data as T
 }
@@ -128,10 +173,20 @@ export async function cpRotateKey(token: string): Promise<CpKey> {
 const JWT_KEY = 'agentflow-cp-jwt-v1'
 
 export function storeCpJwt(token: string): void {
+  // Renderer cache — synchronous, read by the balance pill and the gate's
+  // initial authed check.
   try {
     window.localStorage.setItem(JWT_KEY, token)
   } catch {
     /* localStorage unavailable */
+  }
+  // Durable + secure copy in the Electron MAIN process (OS keychain via
+  // safeStorage). Fire-and-forget: the localStorage cache is authoritative for
+  // the current session, this only survives a cache clear / reinstall.
+  try {
+    void cpBridge()?.cpTokenSet?.(token)
+  } catch {
+    /* bridge absent (dev web) */
   }
 }
 
@@ -143,9 +198,44 @@ export function getCpJwt(): string | null {
   }
 }
 
+/**
+ * Seed the renderer cache from the MAIN-process safeStorage store when the
+ * localStorage cache is empty (fresh window / cleared cache). Call once before
+ * deciding whether to show the auth gate so a returning user stays signed in.
+ */
+export async function hydrateCpJwtFromMain(): Promise<string | null> {
+  const cached = getCpJwt()
+  if (cached) {
+    return cached
+  }
+  const bridge = cpBridge()
+  if (!bridge?.cpTokenGet) {
+    return null
+  }
+  try {
+    const token = await bridge.cpTokenGet()
+    if (token) {
+      try {
+        window.localStorage.setItem(JWT_KEY, token)
+      } catch {
+        /* ignore */
+      }
+      return token
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
 export function clearCpJwt(): void {
   try {
     window.localStorage.removeItem(JWT_KEY)
+  } catch {
+    /* ignore */
+  }
+  try {
+    void cpBridge()?.cpTokenClear?.()
   } catch {
     /* ignore */
   }

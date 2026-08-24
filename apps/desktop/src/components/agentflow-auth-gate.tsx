@@ -1,7 +1,26 @@
-import { type CSSProperties, useState } from 'react'
+import { type CSSProperties, useEffect, useState } from 'react'
 
 import { getCpJwt } from '@/lib/cp-auth'
-import { loginAgentFlow, type OnboardingContext } from '@/store/onboarding'
+import { completeAgentFlowTelegramLogin, loginAgentFlow, type OnboardingContext } from '@/store/onboarding'
+
+// The site's Telegram login redirects the OS browser back to the app via this
+// deep link once auth succeeds: hermes://agentflow-auth?token=<CP JWT>. Main's
+// generic hermes:// handler parses it to { kind:'agentflow-auth', params:{ token } }
+// and forwards it to the renderer over hermes:deep-link.
+const TELEGRAM_DEEP_LINK_KIND = 'agentflow-auth'
+
+interface DeepLinkPayload {
+  kind: string
+  name: string
+  params: Record<string, string>
+}
+interface DeepLinkBridge {
+  onDeepLink?: (cb: (payload: DeepLinkPayload) => void) => () => void
+  signalDeepLinkReady?: () => void
+}
+function deepLinkBridge(): DeepLinkBridge | undefined {
+  return (window as unknown as { hermesDesktop?: DeepLinkBridge }).hermesDesktop
+}
 
 const SITE_URL = (import.meta.env.VITE_AGENTFLOW_SITE_URL as string | undefined) ?? 'https://agentflow.website'
 
@@ -54,7 +73,43 @@ export function AgentFlowAuthGate({ profile, requestGateway }: AgentFlowAuthGate
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [saving, setSaving] = useState(false)
+  const [tgPending, setTgPending] = useState(false)
   const [error, setError] = useState<null | string>(null)
+
+  // Telegram login return path: capture the hermes://agentflow-auth?token=…
+  // deep link, then finish exactly like email/password (issue key, point the
+  // runtime at our gateway).
+  useEffect(() => {
+    const bridge = deepLinkBridge()
+    if (!bridge?.onDeepLink) {
+      return
+    }
+    const off = bridge.onDeepLink(payload => {
+      if (payload?.kind !== TELEGRAM_DEEP_LINK_KIND) {
+        return
+      }
+      const token = payload.params?.token
+      if (!token) {
+        setTgPending(false)
+        setError('Telegram-вход не вернул токен. Попробуй ещё раз.')
+        return
+      }
+      setTgPending(true)
+      setError(null)
+      const ctx: OnboardingContext = { requestGateway, profile, onCompleted: () => undefined }
+      void completeAgentFlowTelegramLogin(token, ctx).then(res => {
+        if (res.ok) {
+          setAuthed(true)
+        } else {
+          setTgPending(false)
+          setError(res.message ?? 'Не удалось войти через Telegram.')
+        }
+      })
+    })
+    // Flush a link that arrived during boot (main queues until a listener is up).
+    bridge.signalDeepLinkReady?.()
+    return off
+  }, [profile, requestGateway])
 
   if (authed) {
     return null
@@ -237,7 +292,16 @@ export function AgentFlowAuthGate({ profile, requestGateway }: AgentFlowAuthGate
           <span style={{ flex: 1, height: 1, background: C.line }} />
         </div>
         <button
-          onClick={() => openSite('/login')}
+          disabled={tgPending}
+          onClick={() => {
+            setError(null)
+            setTgPending(true)
+            // The site finishes Telegram auth and redirects back to
+            // hermes://agentflow-auth?token=<JWT>, which the deep-link listener
+            // above captures. Passing desktop=1 + the redirect target tells the
+            // site to hand the token to the app instead of rendering a web session.
+            openSite(`/login?desktop=1&redirect=${encodeURIComponent('hermes://agentflow-auth')}`)
+          }}
           style={{
             width: '100%',
             padding: '13px 0',
@@ -247,7 +311,8 @@ export function AgentFlowAuthGate({ profile, requestGateway }: AgentFlowAuthGate
             color: '#fff',
             fontWeight: 700,
             fontSize: 14,
-            cursor: 'pointer',
+            cursor: tgPending ? 'default' : 'pointer',
+            opacity: tgPending ? 0.6 : 1,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -256,7 +321,7 @@ export function AgentFlowAuthGate({ profile, requestGateway }: AgentFlowAuthGate
           type="button"
         >
           <TelegramIcon />
-          Войти через Telegram
+          {tgPending ? 'Ждём Telegram…' : 'Войти через Telegram'}
         </button>
       </div>
     </div>
