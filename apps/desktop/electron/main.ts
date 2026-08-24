@@ -9938,7 +9938,7 @@ async function startHermes() {
       updateBootProgress(
         {
           error: error.message,
-          message: `Hermes backend failed to start: ${error.message}`,
+          message: `Бэкенд AgentFlow не запустился: ${error.message}`,
           phase: 'backend.error',
           running: false
         },
@@ -9982,7 +9982,7 @@ async function startHermes() {
       }
     })
 
-    await advanceBootProgress('backend.port', 'Waiting for Hermes backend to launch', 86)
+    await advanceBootProgress('backend.port', 'Запускаем бэкенд AgentFlow…', 86)
 
     // Discover the ephemeral port the child bound to
     const port = await Promise.race([
@@ -9995,7 +9995,7 @@ async function startHermes() {
     }
 
     const baseUrl = `http://127.0.0.1:${port}`
-    await advanceBootProgress('backend.wait', 'Waiting for Hermes backend to become ready', 90)
+    await advanceBootProgress('backend.wait', 'Почти готово…', 90)
     await Promise.race([waitForHermes(baseUrl, token), backendStartFailed])
     backendReady = true
     backendStartFailure = null

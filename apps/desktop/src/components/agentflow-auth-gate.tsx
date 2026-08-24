@@ -374,7 +374,7 @@ function AgentFlowSplash({ message, progress, error }: { message?: string; progr
         <div style={{ width: `${pct}%`, height: '100%', background: C.accent, borderRadius: 999, transition: 'width .3s ease' }} />
       </div>
       <div style={{ fontFamily: FONT_MONO, fontSize: 12, letterSpacing: '.04em', color: error ? '#ff6b6b' : C.muted, maxWidth: 360, textAlign: 'center' }}>
-        {error ? error : message ? message : 'Запуск AgentFlow…'}
+        {error ? error : message && !/hermes/i.test(message) ? message : 'Запуск AgentFlow…'}
       </div>
     </div>
   )
