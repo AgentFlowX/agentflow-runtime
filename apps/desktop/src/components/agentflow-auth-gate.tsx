@@ -1,6 +1,9 @@
+import { useStore } from '@nanostores/react'
 import { type CSSProperties, useEffect, useState } from 'react'
 
 import { getCpJwt } from '@/lib/cp-auth'
+import { $desktopBoot } from '@/store/boot'
+import { $gatewayState } from '@/store/session'
 import { completeAgentFlowTelegramLogin, loginAgentFlow, type OnboardingContext } from '@/store/onboarding'
 
 // The site's Telegram login redirects the OS browser back to the app via this
@@ -75,6 +78,12 @@ export function AgentFlowAuthGate({ profile, requestGateway }: AgentFlowAuthGate
   const [saving, setSaving] = useState(false)
   const [tgPending, setTgPending] = useState(false)
   const [error, setError] = useState<null | string>(null)
+  // Show a branded loading splash until the local gateway is up — the login
+  // action needs it, so before it's ready the form would look interactive but
+  // "dead". `open` = the runtime gateway is connected.
+  const boot = useStore($desktopBoot)
+  const gatewayState = useStore($gatewayState)
+  const ready = gatewayState === 'open'
 
   // Telegram login return path: capture the hermes://agentflow-auth?token=…
   // deep link, then finish exactly like email/password (issue key, point the
@@ -113,6 +122,11 @@ export function AgentFlowAuthGate({ profile, requestGateway }: AgentFlowAuthGate
 
   if (authed) {
     return null
+  }
+
+  // Branded preloader while the app boots / the gateway connects — no dead UI.
+  if (!ready) {
+    return <AgentFlowSplash message={boot.message} progress={boot.progress} error={boot.error} />
   }
 
   const isRegister = tab === 'register'
@@ -323,6 +337,44 @@ export function AgentFlowAuthGate({ profile, requestGateway }: AgentFlowAuthGate
           <TelegramIcon />
           {tgPending ? 'Ждём Telegram…' : 'Войти через Telegram'}
         </button>
+      </div>
+    </div>
+  )
+}
+
+/** Branded boot preloader — AgentFlow logo, progress, status. Shown until the
+ *  gateway is ready so the user never faces a "dead" login UI. */
+function AgentFlowSplash({ message, progress, error }: { message?: string; progress?: number; error?: null | string }) {
+  const pct = Math.max(3, Math.min(100, Math.round(progress ?? 3)))
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        background: C.bg,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 22,
+        fontFamily: "'Manrope', system-ui, sans-serif"
+      }}
+    >
+      <style>{'@keyframes afpulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.06);opacity:.82}}@keyframes afspin{to{transform:rotate(360deg)}}'}</style>
+      <div style={{ position: 'relative', width: 96, height: 96, animation: 'afpulse 1.8s ease-in-out infinite' }}>
+        <div style={{ position: 'absolute', inset: -14, borderRadius: '50%', background: C.accent, filter: 'blur(28px)', opacity: 0.35 }} />
+        <svg width="96" height="96" viewBox="0 0 100 100" style={{ position: 'relative' }} aria-hidden>
+          <circle cx="50" cy="50" r="46" fill={C.accent} />
+          <path d="M42 30 L62 50 L42 70" fill="none" stroke={C.onAccent} strokeWidth="13" strokeLinecap="square" />
+        </svg>
+      </div>
+      <div style={{ fontFamily: FONT_DISPLAY, fontWeight: 800, fontSize: 22, letterSpacing: '-.01em', color: C.ink }}>AgentFlow</div>
+      <div style={{ width: 220, height: 4, borderRadius: 999, background: C.panel2, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: C.accent, borderRadius: 999, transition: 'width .3s ease' }} />
+      </div>
+      <div style={{ fontFamily: FONT_MONO, fontSize: 12, letterSpacing: '.04em', color: error ? '#ff6b6b' : C.muted, maxWidth: 360, textAlign: 'center' }}>
+        {error ? error : message ? message : 'Запуск AgentFlow…'}
       </div>
     </div>
   )
