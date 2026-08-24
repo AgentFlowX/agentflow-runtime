@@ -766,7 +766,7 @@ const BOOT_FAKE_STEP_MS = (() => {
   return Math.max(120, raw)
 })()
 
-const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME || 'Hermes'
+const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME || 'AgentFlow'
 const HUD_WINDOW_TITLE = `${APP_NAME} HUD`
 const TITLEBAR_HEIGHT = 34
 const MACOS_TRAFFIC_LIGHTS_HEIGHT = 14
@@ -1085,7 +1085,7 @@ if (IS_WINDOWS) {
 app.setAboutPanelOptions({
   applicationName: APP_NAME,
   applicationVersion: resolveHermesVersion(),
-  copyright: 'Copyright © 2026 Nous Research'
+  copyright: 'Copyright © 2026 AgentFlow'
 })
 
 // Custom scheme for streaming audio/video into the renderer. Local paths read
@@ -1229,7 +1229,7 @@ let nativeThemeListenerInstalled = false
 let bootProgressState = {
   error: null,
   fakeMode: BOOT_FAKE_MODE,
-  message: 'Waiting to start Hermes backend',
+  message: 'Waiting to start AgentFlow backend',
   phase: 'idle',
   progress: 0,
   running: false,
@@ -4469,7 +4469,7 @@ async function ensureRuntime(backend) {
 
     if (await handOffWindowsBootstrapRecovery('bootstrap-needed')) {
       const handoffError: Error & { isBootstrapFailure?: boolean; bootstrapHandedOff?: boolean } = new Error(
-        'Hermes recovery was handed off to Hermes Setup. The desktop will restart when recovery completes.'
+        'AgentFlow recovery was handed off to the AgentFlow installer. The desktop will restart when recovery completes.'
       )
 
       handoffError.isBootstrapFailure = true
@@ -4608,7 +4608,7 @@ async function ensureRuntime(backend) {
   backend.label = `Hermes at ${ACTIVE_HERMES_ROOT} (venv: ${VENV_ROOT})`
   updateBootProgress({
     phase: 'runtime.ready',
-    message: 'Hermes runtime is ready',
+    message: 'AgentFlow runtime is ready',
     progress: 82,
     running: true,
     error: null
@@ -9793,7 +9793,7 @@ async function startHermes() {
       await waitForHermes(remote.baseUrl, remote.token, undefined, remote.authMode)
       updateBootProgress({
         phase: 'backend.ready',
-        message: 'Remote Hermes backend is ready',
+        message: 'Remote AgentFlow backend is ready',
         progress: 94,
         running: true,
         error: null
@@ -10017,7 +10017,7 @@ async function startHermes() {
 
     updateBootProgress({
       phase: 'backend.ready',
-      message: 'Hermes backend is ready. Finalizing desktop startup',
+      message: 'AgentFlow backend is ready. Finalizing desktop startup',
       progress: 94,
       running: true,
       error: null
@@ -10196,7 +10196,7 @@ function spawnSecondaryWindow({ sessionId, watch }: { sessionId?: string; watch?
     height: SESSION_WINDOW_MIN_HEIGHT,
     minWidth: SESSION_WINDOW_MIN_WIDTH,
     minHeight: SESSION_WINDOW_MIN_HEIGHT,
-    title: 'Hermes',
+    title: APP_NAME,
     titleBarStyle: 'hidden',
     titleBarOverlay: getTitleBarOverlayOptions(),
     trafficLightPosition: IS_MAC ? WINDOW_BUTTON_POSITION : undefined,
@@ -10296,7 +10296,7 @@ function createInstanceWindow() {
     ...nextInstanceBounds(),
     minWidth: WINDOW_MIN_WIDTH,
     minHeight: WINDOW_MIN_HEIGHT,
-    title: 'Hermes',
+    title: APP_NAME,
     titleBarStyle: 'hidden',
     titleBarOverlay: getTitleBarOverlayOptions(),
     trafficLightPosition: IS_MAC ? WINDOW_BUTTON_POSITION : undefined,
@@ -11151,7 +11151,7 @@ function createWindow() {
     ...computeWindowOptions(savedWindowState, screen.getAllDisplays()),
     minWidth: WINDOW_MIN_WIDTH,
     minHeight: WINDOW_MIN_HEIGHT,
-    title: 'Hermes',
+    title: APP_NAME,
     // Frameless title bar on every platform so the renderer can paint the
     // "hide sidebar" button (and other left-side titlebar tools) flush with
     // the top edge — matching the macOS layout where the traffic lights sit
@@ -12671,7 +12671,7 @@ ipcMain.handle('hermes:notify', (_event, payload) => {
   const actions = Array.isArray(payload?.actions) ? payload.actions : []
 
   const notification = new Notification({
-    title: payload?.title || 'Hermes',
+    title: payload?.title || APP_NAME,
     body: payload?.body || '',
     silent: Boolean(payload?.silent),
     actions: actions.map(action => ({ type: 'button', text: String(action?.text || '') }))
@@ -13842,7 +13842,7 @@ function showAboutPanelFresh() {
   app.setAboutPanelOptions({
     applicationName: APP_NAME,
     applicationVersion: resolveHermesVersion(),
-    copyright: 'Copyright © 2026 Nous Research'
+    copyright: 'Copyright © 2026 AgentFlow'
   })
   app.showAboutPanel()
 }

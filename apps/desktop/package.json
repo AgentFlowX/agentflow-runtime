@@ -228,9 +228,9 @@
         "CFBundleDisplayName": "AgentFlow",
         "CFBundleExecutable": "AgentFlow",
         "CFBundleName": "AgentFlow",
-        "NSAudioCaptureUsageDescription": "AgentFlow uses audio capture for voice conversations.",
-        "NSCameraUsageDescription": "AgentFlow uses the camera when a plugin or feature you enable requests it.",
-        "NSMicrophoneUsageDescription": "AgentFlow uses the microphone for voice input and voice conversations."
+        "NSAudioCaptureUsageDescription": "AgentFlow использует запись звука для голосовых разговоров.",
+        "NSCameraUsageDescription": "AgentFlow использует камеру, когда её запрашивает включённый вами плагин или функция.",
+        "NSMicrophoneUsageDescription": "AgentFlow использует микрофон для голосового ввода и голосовых разговоров."
       },
       "gatekeeperAssess": false,
       "hardenedRuntime": true,
@@ -240,7 +240,7 @@
       ]
     },
     "dmg": {
-      "title": "Install Hermes",
+      "title": "Установка AgentFlow",
       "backgroundColor": "#f5f5f7",
       "iconSize": 96,
       "window": {
@@ -262,7 +262,7 @@
       ]
     },
     "win": {
-      "legalTrademarks": "Hermes",
+      "legalTrademarks": "AgentFlow",
       "target": [
         "nsis",
         "msi"

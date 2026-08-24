@@ -70,7 +70,7 @@ export default function Success() {
         <div className="flex max-w-2xl items-start gap-2 text-sm" role="alert">
           <AlertCircle className="mt-0.5 shrink-0 text-destructive" size={16} />
           <div className="min-w-0">
-            <div className="font-medium text-destructive">Couldn&rsquo;t launch the desktop app</div>
+            <div className="font-medium text-destructive">Не удалось запустить приложение</div>
             <div className="mt-0.5 text-muted-foreground">{error}</div>
           </div>
         </div>

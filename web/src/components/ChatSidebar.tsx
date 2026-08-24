@@ -34,6 +34,8 @@ import { ModelReloadConfirm } from "@/components/ModelReloadConfirm";
 import { ReasoningPicker } from "@/components/ReasoningPicker";
 import { GatewayClient, type ConnectionState } from "@/lib/gatewayClient";
 import { api, buildWsUrl } from "@/lib/api";
+import { isOutOfTokensSignal } from "@/lib/agentflow";
+import { useBalance } from "@/contexts/balance-context";
 import { maybeReloadForLoopbackWsAuthFailure } from "@/lib/dashboard-auth-reload";
 import {
   EVENTS_CONNECT_TIMEOUT_MS,
@@ -128,6 +130,7 @@ export function ChatSidebar({
   const [info, setInfo] = useState<SessionInfo>({});
   const [modelOpen, setModelOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { flagOutOfTokens } = useBalance();
   // The badge shows config.yaml's main model (`model.default`) via
   // `/api/model/info` — the same value the Models page writes and a new chat
   // session boots from. We deliberately don't use the sidecar's `session.info`
@@ -205,6 +208,7 @@ export function ChatSidebar({
 
       if (message) {
         setError(message);
+        if (isOutOfTokensSignal(message)) flagOutOfTokens();
       }
     });
 

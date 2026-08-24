@@ -34,6 +34,8 @@ import { ChatSidebar } from "@/components/ChatSidebar";
 import { ChatSessionList } from "@/components/ChatSessionList";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { useI18n } from "@/i18n";
+import { useBalance } from "@/contexts/balance-context";
+import { isOutOfTokensSignal } from "@/lib/agentflow";
 import { api } from "@/lib/api";
 import { latchChatActivation } from "@/lib/chat-activation";
 import { normalizeSessionTitle } from "@/lib/chat-title";
@@ -313,6 +315,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     title: string | null;
   }>({ scope: "", title: null });
   const { t } = useI18n();
+  const { flagOutOfTokens } = useBalance();
   const closeMobilePanel = useCallback(() => setMobilePanelOpenRaw(false), []);
   const modelToolsLabel = useMemo(
     () => `${t.app.modelToolsSheetTitle} ${t.app.modelToolsSheetSubtitle}`,
@@ -1205,6 +1208,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       )
         ? () => termRef.current?.scrollToBottom()
         : undefined;
+      if (isOutOfTokensSignal(text)) flagOutOfTokens();
       term.write(rendered, followScroll);
       noteResumePtyChunk(rendered);
     };

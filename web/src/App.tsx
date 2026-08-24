@@ -107,6 +107,9 @@ import { isDashboardEmbeddedChatEnabled } from "@/lib/dashboard-flags";
 import { latchChatActivation } from "@/lib/chat-activation";
 import { api } from "@/lib/api";
 import type { StatusResponse, UpdateCheckResponse } from "@/lib/api";
+import { BalanceProvider } from "@/contexts/BalanceProvider";
+import { AccountBalance } from "@/components/AccountBalance";
+import { OutOfTokensBanner } from "@/components/OutOfTokensBanner";
 
 function RouteFallback({ label = "Loading…" }: { label?: string }) {
   return (
@@ -511,6 +514,7 @@ export default function App() {
 
   return (
     <ProfileProvider>
+    <BalanceProvider>
     <div
       data-layout-variant={layoutVariant}
       className="flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-background-base text-text-primary antialiased"
@@ -574,6 +578,7 @@ export default function App() {
       <PluginSlot name="header-banner" />
       <ProfileScopeBanner />
       <MemoryPressureBanner status={sidebarStatus} />
+      <OutOfTokensBanner />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1">
@@ -746,6 +751,7 @@ export default function App() {
                 isDesktopCollapsed && "lg:hidden",
               )}
             >
+              <AccountBalance />
               <AuthWidget />
               <SidebarFooter status={sidebarStatus} />
             </div>
@@ -825,6 +831,7 @@ export default function App() {
 
       <PluginSlot name="overlay" />
     </div>
+    </BalanceProvider>
     </ProfileProvider>
   );
 }

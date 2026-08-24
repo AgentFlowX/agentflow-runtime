@@ -1329,7 +1329,36 @@ export const api = {
     fetchJSON<SkillHubScan>(
       `/api/skills/hub/scan?identifier=${encodeURIComponent(identifier)}`,
     ),
+  // AgentFlow account balance for the sidebar pill / out-of-tokens banner.
+  // Throws on 404 when the backend endpoint is absent; BalanceProvider treats
+  // that as "unavailable" and hides the UI.
+  getAccountBalance: () =>
+    fetchJSON<AccountBalanceResponse>("/api/account/balance"),
 };
+
+/**
+ * `GET /api/account/balance` — AgentFlow account balance for the dashboard.
+ *
+ * BACKEND TO ADD (hermes_cli/web_server.py, session-gated like other /api
+ * routes): proxy the active scoped key's remaining budget from the AgentFlow
+ * gateway (LiteLLM at https://llm.agentflow.website `/key/info` →
+ * `max_budget - spend`) or the control-plane account API. All fields optional
+ * so the SPA degrades gracefully when the endpoint is not deployed.
+ */
+export interface AccountBalanceResponse {
+  ok?: boolean;
+  /** Remaining spendable amount in `currency` (e.g. RUB / USD). */
+  remaining?: number | null;
+  /** Pre-formatted, server-localized remaining string (wins over `remaining`). */
+  remaining_display?: string | null;
+  /** Remaining tokens, when the plan is token-metered instead of currency. */
+  remaining_tokens?: number | null;
+  currency?: string | null;
+  /** True when the gateway will refuse new turns until top-up. */
+  out_of_tokens?: boolean;
+  /** Optional server override for the top-up link. */
+  topup_url?: string | null;
+}
 
 /** Identity payload returned by ``GET /api/auth/me`` (Phase 7).
  *
