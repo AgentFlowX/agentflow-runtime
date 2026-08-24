@@ -172,9 +172,9 @@ pub async fn launch_hermes_desktop(
     let install_root = PathBuf::from(install_root);
     let exe_path = resolve_hermes_desktop_exe(&install_root).ok_or_else(|| {
         format!(
-            "Couldn't find a built Hermes desktop at {}. The desktop build step \
-             may have been skipped or failed. Run `hermes desktop` from a \
-             terminal to build and launch it.",
+            "Не удалось найти собранное приложение AgentFlow в {}. Шаг сборки \
+             приложения мог быть пропущен или завершиться ошибкой. Выполните \
+             `hermes desktop` в терминале, чтобы собрать и запустить его.",
             install_root.join("apps").join("desktop").join("release").display()
         )
     })?;

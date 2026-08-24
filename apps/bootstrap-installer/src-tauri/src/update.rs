@@ -279,9 +279,9 @@ async fn run_update(app: AppHandle) -> Result<()> {
                 format!("{secs}s")
             };
             let msg = format!(
-                "Another Hermes update is already running (PID {}, started {} ago). \
-                 Wait for it to finish, or close the window or dashboard tab that \
-                 started it, then try again.",
+                "Обновление AgentFlow уже выполняется (PID {}, запущено {} назад). \
+                 Дождитесь его завершения или закройте окно либо вкладку панели, \
+                 которые его запустили, затем попробуйте снова.",
                 owner.pid, elapsed
             );
             emit(
@@ -306,8 +306,8 @@ async fn run_update(app: AppHandle) -> Result<()> {
 
     let hermes = resolve_hermes(&install_root).ok_or_else(|| {
         let msg = format!(
-            "Could not find the hermes CLI under {}. Is Hermes installed? \
-             Re-run the installer to repair the install.",
+            "Не удалось найти CLI hermes в {}. AgentFlow установлен? \
+             Запустите установщик повторно, чтобы восстановить установку.",
             install_root.display()
         );
         emit(
@@ -434,8 +434,8 @@ async fn run_update(app: AppHandle) -> Result<()> {
             emit_stage(&app, "update", StageState::Succeeded, Some(update_ms), None);
         }
         Some(code) if code == UPDATE_EXIT_CONCURRENT => {
-            let msg = "Hermes is still running. Close all Hermes windows and try \
-                       the update again."
+            let msg = "AgentFlow ещё работает. Закройте все окна AgentFlow и \
+                       повторите обновление."
                 .to_string();
             emit_stage(
                 &app,
@@ -455,7 +455,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
         }
         other => {
             let msg = format!(
-                "hermes update failed (exit {:?}). See {} for details.",
+                "Обновление hermes завершилось ошибкой (код {:?}). Подробности в {}.",
                 other,
                 crate::paths::hermes_home()
                     .join("logs")
@@ -526,9 +526,9 @@ async fn run_update(app: AppHandle) -> Result<()> {
 
     if rebuild.exit_code != Some(0) {
         let msg = format!(
-            "Rebuilding the desktop app failed (exit {:?}). The update was \
-             applied but the app could not be rebuilt; run `hermes desktop` \
-             from a terminal to see the error.",
+            "Не удалось пересобрать приложение (код {:?}). Обновление применено, \
+             но приложение не удалось пересобрать; выполните `hermes desktop` \
+             в терминале, чтобы увидеть ошибку.",
             rebuild.exit_code
         );
         emit_stage(
@@ -607,7 +607,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
                 &app,
                 None,
                 LogStream::Stderr,
-                &format!("[update] could not auto-launch desktop: {err}. Launch Hermes manually."),
+                &format!("[update] не удалось автозапустить приложение: {err}. Запустите AgentFlow вручную."),
             );
         }
     } else if let Err(err) =
@@ -620,7 +620,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
             &app,
             None,
             LogStream::Stdout,
-            &format!("[update] could not auto-launch desktop: {err}. Launch Hermes manually."),
+            &format!("[update] не удалось автозапустить приложение: {err}. Запустите AgentFlow вручную."),
         );
     }
 
