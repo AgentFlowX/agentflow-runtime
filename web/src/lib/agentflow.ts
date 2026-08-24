@@ -21,6 +21,23 @@ const RAW_TOPUP_PATH =
 /** Normalised site origin, no trailing slash. */
 export const AGENTFLOW_SITE_URL = RAW_SITE_URL.replace(/\/+$/, "");
 
+// AgentFlow control-plane (CP) — the backend the desktop app authenticates
+// against: POST /v1/auth/{login,register} (email+password → user JWT),
+// GET /v1/me (balance), GET/POST /v1/me/key[/rotate] (unified LLM key).
+// Configurable at build time; falls back to production.
+const RAW_CP_URL =
+  (import.meta.env.VITE_AGENTFLOW_CP_URL as string | undefined) ??
+  "https://cp.agentflow.website:8797";
+
+/** Normalised CP origin, no trailing slash. */
+export const AGENTFLOW_CP_URL = RAW_CP_URL.replace(/\/+$/, "");
+
+/** Absolute URL for a CP API path (leading slash optional). */
+export function cpUrl(path: string): string {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${AGENTFLOW_CP_URL}${p}`;
+}
+
 /** Absolute URL of the top-up page. A per-response `topup_url` overrides this. */
 export function agentflowTopUpUrl(override?: string | null): string {
   if (override && /^https?:\/\//i.test(override)) return override;

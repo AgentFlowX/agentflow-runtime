@@ -11,6 +11,7 @@ import {
   submitOAuthCode,
   validateProviderCredential
 } from '@/hermes'
+import { cpAuthErrorRu, cpLogin, cpRegister, cpRotateKey, storeCpJwt } from '@/lib/cp-auth'
 import { isProviderSetupErrorMessage } from '@/lib/provider-setup-errors'
 import { evaluateRuntimeReadiness, type RuntimeReadinessResult } from '@/lib/runtime-readiness'
 import { setMainModelAssignment } from '@/store/cron-model-impact'
@@ -527,6 +528,45 @@ export function dismissFirstRunOnboarding() {
 
 export function setOnboardingMode(mode: OnboardingMode) {
   patch({ mode })
+}
+
+/**
+ * AgentFlow login — email/password → our control-plane → configure OUR gateway.
+ * Authenticates against CP (login or register), stores the user JWT (for the
+ * balance pill), issues the unified LLM key, and points the local runtime at our
+ * gateway via the PROVEN custom-endpoint path (saveOnboardingLocalEndpoint,
+ * which probes {baseUrl}/models, picks a model, writes provider=custom +
+ * base_url + api_key, verifies the runtime, and completes onboarding). The user
+ * never sees a key or an OAuth screen — just email + password.
+ */
+export async function loginAgentFlow(
+  email: string,
+  password: string,
+  register: boolean,
+  ctx: OnboardingContext
+): Promise<{ ok: boolean; message?: string }> {
+  const mail = email.trim()
+
+  if (!mail || !password) {
+    return { ok: false, message: 'Введи email и пароль.' }
+  }
+
+  try {
+    const auth = register ? await cpRegister(mail, password) : await cpLogin(mail, password)
+    storeCpJwt(auth.token)
+
+    const key = await cpRotateKey(auth.token)
+    const baseUrl = key.baseUrl && /^https?:\/\//.test(key.baseUrl) ? key.baseUrl : 'https://llm.agentflow.website/v1'
+    const raw = key.raw ?? ''
+
+    if (!raw) {
+      return { ok: false, message: 'Сервер не выдал ключ доступа. Попробуй ещё раз.' }
+    }
+
+    return await saveOnboardingLocalEndpoint(baseUrl, raw, ctx)
+  } catch (error) {
+    return { ok: false, message: cpAuthErrorRu(error) }
+  }
 }
 
 export async function refreshOnboarding(ctx: OnboardingContext) {

@@ -19,6 +19,7 @@ import {
   DEFAULT_MANUAL_ONBOARDING_REASON,
   DEFAULT_ONBOARDING_REASON,
   dismissFirstRunOnboarding,
+  loginAgentFlow,
   type OnboardingContext,
   peekPendingProviderOAuth,
   refreshOnboarding,
@@ -420,10 +421,108 @@ const persistShowAll = (value: boolean) => {
   return value
 }
 
+// The DEFAULT first-run screen: a plain email + password login/register form
+// that authenticates against the AgentFlow control-plane and configures the
+// local runtime to use our gateway (loginAgentFlow). No key, no OAuth — the
+// user just signs in. Power users can fall back to the provider picker.
+function AgentFlowLogin({ ctx, onUseProvider }: { ctx: OnboardingContext; onUseProvider: () => void }) {
+  const [isRegister, setIsRegister] = useState(false)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<null | string>(null)
+
+  const canSubmit = email.trim().length > 0 && password.length > 0 && !saving
+
+  const submit = async () => {
+    if (!canSubmit) {
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+    const res = await loginAgentFlow(email, password, isRegister, ctx)
+
+    // On success, loginAgentFlow → saveOnboardingLocalEndpoint completes
+    // onboarding and the overlay unmounts. Only surface failures here.
+    if (!res.ok) {
+      setError(res.message ?? 'Не удалось войти.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-1">
+        <h3 className="text-sm font-semibold">{isRegister ? 'Создать аккаунт AgentFlow' : 'Вход в AgentFlow'}</h3>
+        <p className="text-xs text-muted-foreground">
+          {isRegister
+            ? 'Введи email и пароль — и агент готов к работе.'
+            : 'Войди в свой аккаунт, чтобы подключить агента и видеть баланс.'}
+        </p>
+      </div>
+
+      <div className="grid gap-2">
+        <Input
+          autoComplete="email"
+          autoFocus
+          onChange={e => setEmail(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && !e.nativeEvent.isComposing && void submit()}
+          placeholder="you@example.com"
+          type="email"
+          value={email}
+        />
+        <Input
+          autoComplete={isRegister ? 'new-password' : 'current-password'}
+          onChange={e => setPassword(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && !e.nativeEvent.isComposing && void submit()}
+          placeholder="Пароль"
+          type="password"
+          value={password}
+        />
+        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <Button
+          onClick={() => {
+            setIsRegister(v => !v)
+            setError(null)
+          }}
+          size="xs"
+          type="button"
+          variant="text"
+        >
+          {isRegister ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Регистрация'}
+        </Button>
+        <Button disabled={!canSubmit} onClick={() => void submit()}>
+          {saving ? <Loader2 className="animate-spin" /> : <KeyRound />}
+          {isRegister ? 'Зарегистрироваться' : 'Войти'}
+        </Button>
+      </div>
+
+      <div className="flex justify-center pt-1">
+        <Button
+          className="text-(--ui-text-tertiary)"
+          onClick={onUseProvider}
+          size="xs"
+          type="button"
+          variant="text"
+        >
+          Войти через своего провайдера
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export function Picker({ ctx }: { ctx: OnboardingContext }) {
   const { t } = useI18n()
   const { localEndpoint, manual, mode, providers } = useStore($desktopOnboarding)
   const [showAll, setShowAll] = useState(readShowAll)
+  // First-run shows the AgentFlow email/password login by default; the user can
+  // flip to the provider picker ("Войти через своего провайдера").
+  const [showProviders, setShowProviders] = useState(false)
   // Which key-form option to preselect when we flip to 'apikey' mode. The
   // OpenRouter row selects its key; the generic link lands on the first option.
   const [apiKeyInitialEnv, setApiKeyInitialEnv] = useState<string | undefined>(undefined)
@@ -436,6 +535,14 @@ export function Picker({ ctx }: { ctx: OnboardingContext }) {
   const ordered = useMemo(() => (providers ? sortProviders(providers) : []), [providers])
   const hasOauth = ordered.length > 0
   const apiKeyOptions = useApiKeyCatalog()
+
+  // DEFAULT first-run: the AgentFlow email/password login. It authenticates
+  // against our control-plane and points the runtime at our gateway. Manual
+  // (add/switch provider from Settings) and localEndpoint go straight to the
+  // provider/key surfaces; the user can also opt into the provider picker.
+  if (!manual && !localEndpoint && !showProviders) {
+    return <AgentFlowLogin ctx={ctx} onUseProvider={() => setShowProviders(true)} />
+  }
 
   // localEndpoint forces the key form regardless of `mode` (which a manual
   // provider refresh may flip back to 'oauth'); it preselects the local option
