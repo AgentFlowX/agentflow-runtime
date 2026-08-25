@@ -3826,6 +3826,40 @@ class TelegramAdapter(BasePlatformAdapter):
         except Exception as e:
             logger.warning("[%s] Failed to persist thread_id to config: %s", self.name, e, exc_info=True)
 
+    def _persist_allowed_topics(self, topics: list[str]) -> None:
+        """Persist the topic allowlist to config.yaml so /bind survives restarts.
+
+        Mirrors :meth:`_persist_dm_topic_thread_id` — writes to
+        ``platforms.telegram.extra.allowed_topics`` (the same ``extra`` the
+        adapter reads via ``self.config.extra``).
+        """
+        try:
+            from hermes_constants import get_hermes_home
+            config_path = get_hermes_home() / "config.yaml"
+            if not config_path.exists():
+                logger.warning("[%s] Config file not found at %s, cannot persist allowed_topics", self.name, config_path)
+                return
+
+            import yaml as _yaml
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = _yaml.safe_load(f) or {}
+
+            platforms = config.setdefault("platforms", {})
+            telegram_config = platforms.setdefault("telegram", {})
+            extra = telegram_config.setdefault("extra", {})
+            extra["allowed_topics"] = list(topics)
+
+            from hermes_cli.config import atomic_config_write
+            atomic_config_write(
+                config_path,
+                config,
+                default_flow_style=False,
+                sort_keys=False,
+            )
+            logger.info("[%s] Persisted allowed_topics=%s to config.yaml", self.name, topics)
+        except Exception as e:
+            logger.warning("[%s] Failed to persist allowed_topics to config: %s", self.name, e, exc_info=True)
+
     async def _setup_dm_topics(self) -> None:
         """Load or create configured DM topics for specified chats.
 
@@ -8706,6 +8740,24 @@ class TelegramAdapter(BasePlatformAdapter):
             return {str(part).strip() for part in raw if str(part).strip()}
         return {part.strip() for part in str(raw).split(",") if part.strip()}
 
+    def _topic_scoped_enabled(self) -> bool:
+        """Whether this bot defaults to SILENT in groups until bound to a topic.
+
+        When on and ``allowed_topics`` is empty, group messages are ignored until
+        an admin runs ``/bind`` inside a topic. Opt-in via config
+        ``telegram.topic_scoped`` or env ``TELEGRAM_TOPIC_SCOPED``.
+        """
+        val = self.config.extra.get("topic_scoped")
+        if val is None:
+            val = _scoped_gate_env("TELEGRAM_TOPIC_SCOPED")
+        return str(val).strip().lower() in ("1", "true", "yes", "on")
+
+    def _set_allowed_topics(self, topics: set[str]) -> None:
+        """Update the in-memory topic allowlist AND persist it to config.yaml."""
+        ordered = sorted(topics, key=lambda t: (len(t), t))
+        self.config.extra["allowed_topics"] = ordered
+        self._persist_allowed_topics(ordered)
+
     def _telegram_ignored_threads(self) -> set[int]:
         raw = self.config.extra.get("ignored_threads")
         if raw is None:
@@ -9512,6 +9564,11 @@ class TelegramAdapter(BasePlatformAdapter):
             topic_id = str(thread_id) if thread_id is not None else self._GENERAL_TOPIC_THREAD_ID
             if topic_id not in allowed_topics:
                 return False
+        elif self._topic_scoped_enabled():
+            # Topic-scoped bot with no bindings yet → stay silent in the group
+            # until an admin runs /bind@<bot> inside a topic. The /bind command
+            # itself bypasses this gate (handled before _should_process_message).
+            return False
 
         # Check ignored_threads first — applies to both groups and DM topics
         if thread_id is not None:
@@ -9629,10 +9686,78 @@ class TelegramAdapter(BasePlatformAdapter):
         event = self._apply_telegram_group_observe_attribution(event)
         self._enqueue_text_event(event)
 
+    async def _maybe_handle_topic_bind_command(self, msg, context) -> bool:
+        """Handle the topic-binding admin commands /bind /unbind /topics.
+
+        Runs BEFORE the topic gate so a topic-scoped bot can be bound to a NEW
+        topic. In a multi-bot group the command must target THIS bot — either the
+        Telegram ``/cmd@botusername`` form addressed to us, or a bare ``/cmd``
+        (single-bot groups). A ``/cmd@otherbot`` is consumed silently (not ours).
+
+        Returns True when the message is one of these commands (so the caller
+        stops), False to let normal command handling proceed.
+        """
+        text = (getattr(msg, "text", "") or "").strip()
+        if not text.startswith("/"):
+            return False
+        head = text.split(maxsplit=1)[0][1:]  # drop leading '/'
+        cmd, _, at = head.partition("@")
+        cmd = cmd.lower()
+        if cmd not in ("bind", "unbind", "topics"):
+            return False
+        # Addressed to another bot in the group → not ours; consume silently.
+        if at and at.lower() != self._current_bot_username().lower():
+            return True
+        # These commands manage GROUP forum topics only.
+        if not self._is_group_chat(msg):
+            return False
+        # Only authorized users (the owner / allowlist) may bind.
+        if not self._is_user_authorized_from_message(msg):
+            return True
+        chat = getattr(msg, "chat", None)
+        chat_id = getattr(chat, "id", None)
+        thread_id = self._effective_message_thread_id(msg)
+        topic_id = str(thread_id) if thread_id is not None else self._GENERAL_TOPIC_THREAD_ID
+        topics = set(self._telegram_allowed_topics())
+        me = self._current_bot_username()
+
+        if cmd == "bind":
+            topics.add(topic_id)
+            self._set_allowed_topics(topics)
+            reply = f"✅ Привязан к этой теме (id {topic_id}). Отвечаю в темах: {', '.join(sorted(topics, key=lambda t: (len(t), t)))}."
+        elif cmd == "unbind":
+            topics.discard(topic_id)
+            self._set_allowed_topics(topics)
+            reply = (
+                f"Отвязан от темы id {topic_id}. Осталось: {', '.join(sorted(topics, key=lambda t: (len(t), t)))}."
+                if topics
+                else "Отвязан. Привязанных тем больше нет — молчу в этой группе, пока не сделаешь /bind."
+            )
+        else:  # topics
+            reply = (
+                f"Мои темы: {', '.join(sorted(topics, key=lambda t: (len(t), t)))}."
+                if topics
+                else f"Тем нет — молчу в группе. Зайди в нужную тему и напиши /bind@{me}."
+            )
+
+        try:
+            kwargs = {"chat_id": chat_id, "text": reply}
+            if thread_id is not None and str(thread_id) != self._GENERAL_TOPIC_THREAD_ID:
+                kwargs["message_thread_id"] = int(thread_id)
+            await context.bot.send_message(**kwargs)
+        except Exception as e:  # noqa: BLE001 — never let a reply failure crash polling
+            logger.warning("[%s] topic-bind reply failed: %s", self.name, e)
+        return True
+
     async def _handle_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming command messages."""
         msg = self._effective_update_message(update)
         if not msg or not msg.text:
+            return
+        # Topic-binding admin commands (/bind /unbind /topics) run BEFORE the topic
+        # gate — a topic-scoped bot must be bindable to a NEW topic even though the
+        # gate would otherwise drop that very command. Auth is enforced inside.
+        if await self._maybe_handle_topic_bind_command(msg, context):
             return
         if not self._should_process_message(msg, is_command=True):
             return
