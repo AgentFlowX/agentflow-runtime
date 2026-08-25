@@ -111,3 +111,72 @@ class TestWiringGuards:
         assert '"bind"' in src and '"unbind"' in src and '"topics"' in src
         # must reject commands addressed to a DIFFERENT bot (multi-bot group)
         assert "_current_bot_username" in src
+
+
+class _FakeBot:
+    def __init__(self):
+        self.sent = []
+
+    async def send_message(self, **kwargs):
+        self.sent.append(kwargs)
+
+
+def _group_msg(text, *, chat_id=-1001234, thread_id=7):
+    chat = SimpleNamespace(id=chat_id, type="supergroup", is_forum=True)
+    return SimpleNamespace(
+        text=text, chat=chat, message_thread_id=thread_id,
+        from_user=SimpleNamespace(id=555),
+    )
+
+
+def _prep_adapter(username="landing_bot", extra=None):
+    a = _bare_adapter(extra or {})
+    a._current_bot_username = lambda: username
+    a._is_group_chat = lambda m: True
+    a._is_user_authorized_from_message = lambda m: True
+    a._effective_message_thread_id = lambda m: getattr(m, "message_thread_id", None)
+    a._persist_allowed_topics = lambda t: None  # no disk write in tests
+    return a
+
+
+def _call(adapter, msg):
+    import asyncio
+    bot = _FakeBot()
+    ctx = SimpleNamespace(bot=bot)
+    handled = asyncio.run(adapter._maybe_handle_topic_bind_command(msg, ctx))
+    return handled, bot
+
+
+class TestBindAddressing:
+    def test_bind_at_self_binds_and_replies(self):
+        a = _prep_adapter("landing_bot")
+        handled, bot = _call(a, _group_msg("/bind@landing_bot", thread_id=7))
+        assert handled is True
+        assert a.config.extra.get("allowed_topics") == ["7"]
+        assert len(bot.sent) == 1  # confirmation sent
+
+    def test_bind_at_other_bot_is_silent_noop(self):
+        a = _prep_adapter("video_bot", {"allowed_topics": ["3"]})
+        handled, bot = _call(a, _group_msg("/bind@landing_bot", thread_id=7))
+        assert handled is True                    # consumed (not forwarded to agent)
+        assert a.config.extra.get("allowed_topics") == ["3"]  # unchanged
+        assert bot.sent == []                     # NO reaction
+
+    def test_bare_bind_is_silent_noop(self):
+        a = _prep_adapter("landing_bot")
+        handled, bot = _call(a, _group_msg("/bind", thread_id=7))
+        assert handled is True                    # consumed
+        assert "allowed_topics" not in a.config.extra  # nothing bound
+        assert bot.sent == []                     # no bot reacts to a bare /bind
+
+    def test_non_bind_command_falls_through(self):
+        a = _prep_adapter("landing_bot")
+        handled, bot = _call(a, _group_msg("/status", thread_id=7))
+        assert handled is False                   # normal command handling proceeds
+
+    def test_unbind_at_self_removes_topic(self):
+        a = _prep_adapter("landing_bot", {"allowed_topics": ["7", "9"]})
+        handled, bot = _call(a, _group_msg("/unbind@landing_bot", thread_id=7))
+        assert handled is True
+        assert a.config.extra.get("allowed_topics") == ["9"]
+        assert len(bot.sent) == 1

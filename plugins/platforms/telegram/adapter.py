@@ -9705,8 +9705,12 @@ class TelegramAdapter(BasePlatformAdapter):
         cmd = cmd.lower()
         if cmd not in ("bind", "unbind", "topics"):
             return False
-        # Addressed to another bot in the group → not ours; consume silently.
-        if at and at.lower() != self._current_bot_username().lower():
+        # Multi-bot safety: ONLY the explicitly named bot may act. Require the
+        # ``/bind@<thisbot>`` form — a command aimed at ANOTHER bot, or a bare
+        # ``/bind`` with no @username, is consumed silently so that no OTHER agent
+        # in the group ever reacts. Match the live @username case-insensitively.
+        me = (self._current_bot_username() or "").lower()
+        if not me or not at or at.lower() != me:
             return True
         # These commands manage GROUP forum topics only.
         if not self._is_group_chat(msg):
