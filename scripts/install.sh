@@ -3208,14 +3208,23 @@ install_desktop() {
 
     local app=""
     if [ "$OS" = "linux" ]; then
-        if [ -x "$desktop_dir/release/linux-unpacked/Hermes" ]; then
-            app="$desktop_dir/release/linux-unpacked/Hermes"
-        elif [ -x "$desktop_dir/release/linux-unpacked/hermes" ]; then
-            app="$desktop_dir/release/linux-unpacked/hermes"
-        fi
+        # AgentFlow is the current productName; Hermes kept as a fallback.
+        local lcand
+        for lcand in \
+            "$desktop_dir/release/linux-unpacked/AgentFlow" \
+            "$desktop_dir/release/linux-unpacked/agentflow" \
+            "$desktop_dir/release/linux-unpacked/Hermes" \
+            "$desktop_dir/release/linux-unpacked/hermes"; do
+            if [ -x "$lcand" ]; then
+                app="$lcand"
+                break
+            fi
+        done
     else
         local cand
         for cand in \
+            "$desktop_dir/release/mac-arm64/AgentFlow.app" \
+            "$desktop_dir/release/mac/AgentFlow.app" \
             "$desktop_dir/release/mac-arm64/Hermes.app" \
             "$desktop_dir/release/mac/Hermes.app"; do
             if [ -d "$cand" ]; then
