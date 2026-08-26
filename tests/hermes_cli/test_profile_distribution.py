@@ -17,14 +17,17 @@ import pytest
 
 from hermes_cli.profile_distribution import (
     DEFAULT_DIST_OWNED,
+    BoilerplateEntry,
     DistributionError,
     DistributionManifest,
     EnvRequirement,
     MANIFEST_FILENAME,
+    ProgramsSpec,
     USER_OWNED_EXCLUDE,
     _env_template_from_manifest,
     _looks_like_git_url,
     _parse_semver,
+    _programs_enabled,
     check_hermes_requires,
     describe_distribution,
     install_distribution,
@@ -759,3 +762,152 @@ class TestManifestCrashDurability:
         mode = stat.S_IMODE(mf.stat().st_mode)
         assert mode == 0o644, f"new manifest created as {oct(mode)}"
 
+
+
+# ===========================================================================
+# v2 additions: programs + boilerplate (backward-compatible)
+# ===========================================================================
+
+
+class TestManifestV2BackwardCompat:
+    """A v1 manifest (no programs/boilerplate) must round-trip byte-identical."""
+
+    def test_v1_manifest_gains_no_new_keys(self):
+        v1 = {
+            "name": "telemetry",
+            "version": "0.2.0",
+            "description": "d",
+            "env_requires": [{"name": "K", "description": "x"}],
+            "distribution_owned": ["SOUL.md", "skills"],
+            "source": "github.com/a/b",
+        }
+        out = DistributionManifest.from_dict(v1).to_dict()
+        assert "programs" not in out
+        assert "boilerplate" not in out
+
+    def test_to_dict_is_a_fixed_point(self):
+        out = DistributionManifest.from_dict(
+            {"name": "x", "version": "1.0.0", "distribution_owned": ["SOUL.md"]}
+        ).to_dict()
+        assert DistributionManifest.from_dict(out).to_dict() == out
+
+    def test_empty_programs_block_is_omitted(self):
+        m = DistributionManifest.from_dict({"name": "x", "programs": {}})
+        assert m.programs is None or m.programs.is_empty()
+        assert "programs" not in m.to_dict()
+
+    def test_key_order_programs_boilerplate_between_owned_and_source(self):
+        keys = list(
+            DistributionManifest.from_dict(
+                {
+                    "name": "z",
+                    "distribution_owned": ["SOUL.md"],
+                    "programs": {"apt": ["x"]},
+                    "boilerplate": [{"into": "workspace"}],
+                    "source": "s",
+                }
+            )
+            .to_dict()
+            .keys()
+        )
+        assert keys.index("distribution_owned") < keys.index("programs")
+        assert keys.index("programs") < keys.index("boilerplate")
+        assert keys.index("boilerplate") < keys.index("source")
+
+
+class TestProgramsSpec:
+    def test_round_trip_omits_empty_lists(self):
+        spec = ProgramsSpec.from_dict({"apt": ["ffmpeg"], "pip": ["whisper"], "run": "echo hi"})
+        assert spec.to_dict() == {"apt": ["ffmpeg"], "pip": ["whisper"], "run": "echo hi"}
+
+    def test_coerces_and_drops_blanks(self):
+        spec = ProgramsSpec.from_dict({"apt": ["a", "", "  ", "b"], "npm": "not-a-list"})
+        assert spec.apt == ["a", "b"]
+        assert spec.npm == []
+
+    def test_is_empty(self):
+        assert ProgramsSpec().is_empty()
+        assert not ProgramsSpec(pip=["x"]).is_empty()
+
+
+class TestBoilerplateEntry:
+    @pytest.mark.parametrize("bad", ["/abs", "/etc/passwd", "../x", "..", "sessions", ".env", "memories/x"])
+    def test_rejects_unsafe_into(self, bad):
+        with pytest.raises(DistributionError):
+            BoilerplateEntry.from_dict({"into": bad})
+
+    @pytest.mark.parametrize("good", ["workspace", "workspace/studio", "home/notes", "skills/x", "mydir"])
+    def test_allows_relative_into(self, good):
+        assert BoilerplateEntry.from_dict({"into": good}).into == good.strip("/")
+
+    def test_missing_into_rejected(self):
+        with pytest.raises(DistributionError):
+            BoilerplateEntry.from_dict({"from": "a/b/c"})
+
+    def test_round_trip(self):
+        e = BoilerplateEntry.from_dict({"into": "workspace/s", "from": "a/b/c"})
+        assert e.to_dict() == {"into": "workspace/s", "from": "a/b/c"}
+
+
+class TestProgramsGate:
+    def test_off_by_default(self, monkeypatch):
+        monkeypatch.delenv("HERMES_PROFILE_WITH_PROGRAMS", raising=False)
+        assert _programs_enabled(False) is False
+
+    def test_flag_enables(self, monkeypatch):
+        monkeypatch.delenv("HERMES_PROFILE_WITH_PROGRAMS", raising=False)
+        assert _programs_enabled(True) is True
+
+    @pytest.mark.parametrize("val,expected", [("1", True), ("true", True), ("yes", True), ("no", False), ("0", False)])
+    def test_env_switch(self, monkeypatch, val, expected):
+        monkeypatch.setenv("HERMES_PROFILE_WITH_PROGRAMS", val)
+        assert _programs_enabled(False) is expected
+
+
+class TestInstallProvisioning:
+    def _v2_dist(self, root: Path) -> Path:
+        staged = root / "v2src"
+        staged.mkdir(parents=True, exist_ok=True)
+        (staged / "SOUL.md").write_text("soul\n")
+        (staged / "bp").mkdir()
+        (staged / "bp" / "index.js").write_text("console.log(1)\n")
+        (staged / MANIFEST_FILENAME).write_text(
+            "name: prov\n"
+            "version: 1.0.0\n"
+            "boilerplate:\n"
+            "  - into: workspace/studio\n"
+            "    dir: bp\n"
+            "programs:\n"
+            '  run: "echo hi > ranfile"\n'
+        )
+        return staged
+
+    def test_boilerplate_seeds_but_programs_gated_off(self, profile_env, monkeypatch, tmp_path):
+        monkeypatch.delenv("HERMES_PROFILE_WITH_PROGRAMS", raising=False)
+        src = self._v2_dist(tmp_path)
+        plan = install_distribution(str(src), name="prov")
+        tgt = plan.target_dir
+        assert (tgt / "workspace" / "studio" / "index.js").is_file()
+        assert not (tgt / "workspace" / "ranfile").exists()
+        assert not list(tgt.glob(".programs-installed@*"))
+        assert plan.programs_report == []
+
+    def test_seed_if_empty_preserves_agent_edits_on_update(self, profile_env, monkeypatch, tmp_path):
+        monkeypatch.delenv("HERMES_PROFILE_WITH_PROGRAMS", raising=False)
+        src = self._v2_dist(tmp_path)
+        plan = install_distribution(str(src), name="prov")
+        edited = plan.target_dir / "workspace" / "studio" / "index.js"
+        edited.write_text("MYEDIT\n")
+        update_distribution("prov")
+        assert edited.read_text() == "MYEDIT\n"
+
+    def test_programs_run_when_opted_in_with_version_marker(self, profile_env, monkeypatch, tmp_path):
+        monkeypatch.setenv("HERMES_PROFILE_WITH_PROGRAMS", "1")
+        src = self._v2_dist(tmp_path)
+        plan = install_distribution(str(src), name="prov")
+        tgt = plan.target_dir
+        assert (tgt / "workspace" / "ranfile").read_text().strip() == "hi"
+        assert [m.name for m in tgt.glob(".programs-installed@*")] == [".programs-installed@1.0.0"]
+        # idempotent: same version skips
+        plan2 = install_distribution(str(src), name="prov", force=True)
+        assert any("skip" in line for line in plan2.programs_report)

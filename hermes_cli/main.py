@@ -10339,9 +10339,22 @@ def cmd_profile(args):
                 name=getattr(args, "install_name", None),
                 force=getattr(args, "force", False),
                 create_alias=getattr(args, "alias", False),
+                with_programs=getattr(args, "with_programs", False),
             )
             print(f"\n✓ Installed '{plan.manifest.name}' v{plan.manifest.version}")
             print(f"  Profile path: {plan.target_dir}")
+            for line in plan.boilerplate_report:
+                print(f"  boilerplate: {line}")
+            for line in plan.programs_report:
+                print(f"  programs: {line}")
+            if (plan.manifest.programs is not None
+                    and not plan.manifest.programs.is_empty()
+                    and not plan.programs_report):
+                print(
+                    "  This distribution ships a programs block (apt/pip/npm) that "
+                    "was NOT run.\n"
+                    "  Re-run with --with-programs to install it."
+                )
             if plan.manifest.env_requires:
                 print(
                     f"  Next: copy .env.EXAMPLE to .env and fill in required keys:\n"
@@ -10393,8 +10406,16 @@ def cmd_profile(args):
                     print("Update cancelled.")
                     return
 
-            plan = update_distribution(canon, force_config=force_config)
+            plan = update_distribution(
+                canon,
+                force_config=force_config,
+                with_programs=getattr(args, "with_programs", False),
+            )
             print(f"\n✓ Updated '{plan.manifest.name}' → v{plan.manifest.version}")
+            for line in plan.boilerplate_report:
+                print(f"  boilerplate: {line}")
+            for line in plan.programs_report:
+                print(f"  programs: {line}")
             if plan.has_cron:
                 print(
                     "  Cron files were refreshed.  Review with:  "

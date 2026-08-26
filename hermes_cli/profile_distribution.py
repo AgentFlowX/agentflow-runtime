@@ -47,6 +47,19 @@ Manifest format (``distribution.yaml`` at the profile root)::
       - skills/
       - cron/
       - mcp.json
+    programs:                # optional; runtime packages (apt/pip/npm + one
+      apt: [ffmpeg]          # build step). GATED: not run unless the caller
+      pip: [openai-whisper]  # passes --with-programs or sets
+      npm: [pm2]             # HERMES_PROFILE_WITH_PROGRAMS=1, because these
+      run: "npx remotion bundle"   # steps execute arbitrary code.
+    boilerplate:             # optional; scaffold seeded into a profile path
+      - into: workspace/studio     # ONLY when that path is empty (agent edits
+        from: owner/repo/path      # are never clobbered on update). Source is
+      - into: workspace/site       # `from` (a GitHub owner/repo/path, sparse-
+        dir: templates/site        # cloned) or `dir` (a folder in this repo).
+
+Backward-compatible: a manifest that declares neither ``programs`` nor
+``boilerplate`` behaves exactly as before and round-trips byte-identical.
 
 Update semantics:
 
@@ -61,6 +74,7 @@ Update semantics:
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -166,6 +180,125 @@ class EnvRequirement:
         return out
 
 
+# Boilerplate must never seed OVER credentials / runtime state / user history —
+# even on a fresh install where those dirs are momentarily empty. Anything else
+# (workspace, home, skills, a custom dir) is fair game, still guarded by
+# seed-if-empty so an author can't clobber the agent's own later edits.
+_BOILERPLATE_FORBIDDEN_ROOTS: frozenset = frozenset({
+    "auth.json", ".env", "auth.lock", "active_profile",
+    "state.db", "state.db-shm", "state.db-wal",
+    "hermes_state.db", "response_store.db",
+    "response_store.db-shm", "response_store.db-wal",
+    "sessions", "memories", "logs", "local", "profiles",
+})
+
+
+@dataclass
+class ProgramsSpec:
+    """OS / language packages a distribution needs at runtime (whisper, ffmpeg…).
+
+    Mirrors the proven cloud contract (resync-skills.sh ``AGENT_PROGRAMS``): apt
+    + pip + npm package lists plus one optional ``run`` build step. Installed
+    best-effort and idempotently (a version-keyed marker skips reinstall).
+    Execution is GATED (see :func:`_programs_enabled`) because apt/pip/npm/run
+    all execute arbitrary code — a plain ``hermes profile install`` never runs
+    them unless the caller explicitly opts in (``--with-programs`` /
+    ``HERMES_PROFILE_WITH_PROGRAMS=1``).
+    """
+    apt: List[str] = field(default_factory=list)
+    pip: List[str] = field(default_factory=list)
+    npm: List[str] = field(default_factory=list)
+    run: str = ""
+
+    @staticmethod
+    def _strlist(v: Any) -> List[str]:
+        if not isinstance(v, list):
+            return []
+        return [str(x).strip() for x in v if str(x).strip()]
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "ProgramsSpec":
+        if not isinstance(data, dict):
+            raise DistributionError(
+                f"programs must be a mapping, got {type(data).__name__}"
+            )
+        run = data.get("run")
+        return cls(
+            apt=cls._strlist(data.get("apt")),
+            pip=cls._strlist(data.get("pip")),
+            npm=cls._strlist(data.get("npm")),
+            run=str(run).strip() if isinstance(run, str) else "",
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        if self.apt:
+            out["apt"] = list(self.apt)
+        if self.pip:
+            out["pip"] = list(self.pip)
+        if self.npm:
+            out["npm"] = list(self.npm)
+        if self.run:
+            out["run"] = self.run
+        return out
+
+    def is_empty(self) -> bool:
+        return not (self.apt or self.pip or self.npm or self.run)
+
+
+@dataclass
+class BoilerplateEntry:
+    """Scaffold seeded into a profile path ONLY when that path is empty.
+
+    ``into`` is a profile-relative directory (e.g. ``workspace/studio``). The
+    source is either ``from`` (an ``owner/repo/path`` GitHub ref, sparse-cloned)
+    or ``dir`` (a folder shipped inside the distribution itself). Seed-if-empty:
+    the agent's own later edits are never clobbered on update.
+    """
+    into: str
+    from_: str = ""
+    dir: str = ""
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "BoilerplateEntry":
+        if not isinstance(data, dict):
+            raise DistributionError(
+                f"boilerplate entry must be a mapping, got {type(data).__name__}"
+            )
+        raw = str(data.get("into") or "").strip()
+        if not raw:
+            raise DistributionError("boilerplate entry missing 'into'")
+        # Reject an absolute path up-front rather than silently reinterpreting
+        # it as relative (stripping the leading slash below would do that).
+        if raw.startswith("/") or PurePosixPath(raw).is_absolute():
+            raise DistributionError(
+                f"boilerplate 'into' must be a relative, non-escaping path: {raw!r}"
+            )
+        into = raw.strip("/")
+        parts = PurePosixPath(into).parts
+        if not parts or ".." in parts:
+            raise DistributionError(
+                f"boilerplate 'into' must be a relative, non-escaping path: {raw!r}"
+            )
+        if parts[0] in _BOILERPLATE_FORBIDDEN_ROOTS:
+            raise DistributionError(
+                f"boilerplate 'into' may not target the protected path {parts[0]!r}"
+            )
+        return cls(
+            into=into,
+            from_=str(data.get("from") or "").strip(),
+            dir=str(data.get("dir") or "").strip().strip("/"),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {"into": self.into}
+        if self.from_:
+            out["from"] = self.from_
+        if self.dir:
+            out["dir"] = self.dir
+        return out
+
+
 @dataclass
 class DistributionManifest:
     name: str
@@ -176,6 +309,11 @@ class DistributionManifest:
     license: str = ""
     env_requires: List[EnvRequirement] = field(default_factory=list)
     distribution_owned: List[str] = field(default_factory=list)
+    # Optional runtime provisioning (backward-compatible: absent => today's
+    # behavior exactly).  ``programs`` = apt/pip/npm/run packages the profile
+    # needs; ``boilerplate`` = scaffold seeded into empty profile paths.
+    programs: Optional["ProgramsSpec"] = None
+    boilerplate: List["BoilerplateEntry"] = field(default_factory=list)
     # Tracked after install — where we pulled from, so ``update`` can re-pull.
     source: str = ""
     # ISO-8601 UTC timestamp written on install / update, so ``info`` and
@@ -200,6 +338,12 @@ class DistributionManifest:
         if dist_owned_raw and not isinstance(dist_owned_raw, list):
             raise DistributionError("distribution_owned must be a list")
         distribution_owned = [str(p).strip().strip("/") for p in dist_owned_raw if str(p).strip()]
+        programs_raw = data.get("programs")
+        programs = ProgramsSpec.from_dict(programs_raw) if programs_raw else None
+        boilerplate_raw = data.get("boilerplate") or []
+        if boilerplate_raw and not isinstance(boilerplate_raw, list):
+            raise DistributionError("boilerplate must be a list")
+        boilerplate = [BoilerplateEntry.from_dict(b) for b in boilerplate_raw]
         return cls(
             name=name,
             version=str(data.get("version") or "0.1.0"),
@@ -209,6 +353,8 @@ class DistributionManifest:
             license=str(data.get("license") or ""),
             env_requires=env_requires,
             distribution_owned=distribution_owned,
+            programs=programs,
+            boilerplate=boilerplate,
             source=str(data.get("source") or ""),
             installed_at=str(data.get("installed_at") or ""),
         )
@@ -230,6 +376,12 @@ class DistributionManifest:
             out["env_requires"] = [e.to_dict() for e in self.env_requires]
         if self.distribution_owned:
             out["distribution_owned"] = self.distribution_owned
+        # omit-empty is the single guarantee a v1 manifest (neither field)
+        # round-trips byte-identical.
+        if self.programs is not None and not self.programs.is_empty():
+            out["programs"] = self.programs.to_dict()
+        if self.boilerplate:
+            out["boilerplate"] = [b.to_dict() for b in self.boilerplate]
         if self.source:
             out["source"] = self.source
         if self.installed_at:
@@ -480,6 +632,9 @@ class InstallPlan:
     preserves_config: bool = True
     has_cron: bool = False
     has_skills: bool = False
+    # Populated by install/update after payload copy — one line per install step.
+    programs_report: List[str] = field(default_factory=list)
+    boilerplate_report: List[str] = field(default_factory=list)
 
 
 def _has_cron_jobs(staged: Path) -> bool:
@@ -659,16 +814,196 @@ def _bootstrap_user_dirs(target: Path) -> None:
         (target / d).mkdir(parents=True, exist_ok=True)
 
 
+# ---------------------------------------------------------------------------
+# Programs + boilerplate (v2 provisioning — backward-compatible additions)
+# ---------------------------------------------------------------------------
+
+
+def _programs_enabled(with_programs: bool) -> bool:
+    """Whether to actually run a distribution's ``programs`` (apt/pip/npm/run).
+
+    Gated because those steps execute arbitrary code. A plain
+    ``hermes profile install`` never runs them; the caller opts in with
+    ``--with-programs`` or by setting ``HERMES_PROFILE_WITH_PROGRAMS=1`` (the
+    cloud pod entrypoint does the latter for our own trusted images).
+    """
+    if with_programs:
+        return True
+    return (os.environ.get("HERMES_PROFILE_WITH_PROGRAMS") or "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _run_best_effort(cmd, cwd: Optional[Path] = None, shell: bool = False) -> bool:
+    """Run *cmd* swallowing all failures — returns True on exit 0, else False.
+
+    Never raises: one bad package or build step must not abort the rest of the
+    install (or the pod boot). git/apt are forced non-interactive.
+    """
+    try:
+        subprocess.run(
+            cmd,
+            cwd=str(cwd) if cwd else None,
+            shell=shell,
+            check=True,
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            env={
+                **os.environ,
+                "DEBIAN_FRONTEND": "noninteractive",
+                "GIT_TERMINAL_PROMPT": "0",
+            },
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _install_programs(
+    target: Path,
+    manifest: DistributionManifest,
+    *,
+    force: bool = False,
+) -> List[str]:
+    """Install ``manifest.programs`` best-effort + idempotently.
+
+    A version-keyed marker ``target/.programs-installed@<version>`` skips
+    reinstall until the distribution version bumps (or *force*). NEVER raises: a
+    failing package is logged in the returned report and skipped. Packages land
+    in system dirs (/usr, /usr/local); in the cloud pod ``entrypoint.sh``
+    overlay-mounts those onto the DATA PVC so they persist across restarts — this
+    function assumes that persistence and does not provide it. The marker is
+    written AFTER the attempt (a crash mid-install retries next run) and lives at
+    the profile ROOT — never part of the staged git payload, so
+    ``_copy_dist_payload`` never overwrites it.
+    """
+    programs = manifest.programs
+    if programs is None or programs.is_empty():
+        return []
+    marker = target / f".programs-installed@{manifest.version}"
+    if marker.exists() and not force:
+        return [f"programs skip (v{manifest.version} already installed)"]
+
+    report: List[str] = []
+    if programs.apt:
+        _run_best_effort(["apt-get", "update"])
+        for pkg in programs.apt:
+            ok = _run_best_effort(
+                ["apt-get", "install", "-y", "--no-install-recommends", pkg]
+            )
+            report.append(f"apt {'ok' if ok else 'FAIL'} {pkg}")
+    for dep in programs.pip:
+        ok = _run_best_effort(["python3", "-m", "pip", "install", "--no-input", dep])
+        report.append(f"pip {'ok' if ok else 'FAIL'} {dep}")
+    for mod in programs.npm:
+        ok = _run_best_effort(["npm", "install", "-g", mod])
+        report.append(f"npm {'ok' if ok else 'FAIL'} {mod}")
+    if programs.run:
+        wd = target / "workspace"
+        if not wd.is_dir():
+            wd = target
+        ok = _run_best_effort(programs.run, cwd=wd, shell=True)
+        report.append(f"run {'ok' if ok else 'FAIL'}")
+
+    try:
+        marker.write_text(
+            datetime.now(timezone.utc).isoformat(timespec="seconds") + "\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+    return report
+
+
+def _seed_boilerplate_git(ref: str, dest: Path) -> bool:
+    """Sparse-clone ``owner/repo/path`` from GitHub into *dest*. Best-effort."""
+    parts = ref.split("/")
+    if len(parts) < 3:
+        return False
+    owner, repo = parts[0], parts[1]
+    sub = "/".join(parts[2:])
+    with tempfile.TemporaryDirectory(prefix="hermes_bp_") as tmp:
+        tmpdir = Path(tmp) / "clone"
+        cloned = _run_best_effort([
+            "git", "clone", "--depth", "1", "--filter=blob:none", "--sparse",
+            f"https://github.com/{owner}/{repo}", str(tmpdir),
+        ])
+        if not cloned:
+            return False
+        if not _run_best_effort(["git", "sparse-checkout", "set", sub], cwd=tmpdir):
+            return False
+        srcpath = tmpdir.joinpath(*PurePosixPath(sub).parts)
+        if not srcpath.is_dir():
+            return False
+        try:
+            shutil.copytree(srcpath, dest, dirs_exist_ok=True)
+            return True
+        except Exception:
+            return False
+
+
+def _seed_boilerplate(
+    staged: Path,
+    target: Path,
+    manifest: DistributionManifest,
+) -> List[str]:
+    """Seed each boilerplate entry into its ``into`` path — ONLY if empty.
+
+    ``from`` sparse-clones ``owner/repo/path`` from GitHub; ``dir`` copies a
+    folder shipped inside the freshly staged distribution. Seed-if-empty: a
+    populated target keeps the agent's own edits untouched on update.
+    Best-effort; never raises.
+    """
+    if not manifest.boilerplate:
+        return []
+    report: List[str] = []
+    for entry in manifest.boilerplate:
+        dest = target.joinpath(*PurePosixPath(entry.into).parts)
+        try:
+            populated = dest.exists() and (not dest.is_dir() or any(dest.iterdir()))
+        except Exception:
+            populated = True
+        if populated:
+            report.append(f"boilerplate skip ({entry.into} not empty)")
+            continue
+        dest.mkdir(parents=True, exist_ok=True)
+        if entry.from_:
+            ok = _seed_boilerplate_git(entry.from_, dest)
+            report.append(
+                f"boilerplate {'ok' if ok else 'FAIL'} git {entry.from_} -> {entry.into}"
+            )
+        elif entry.dir:
+            src = staged.joinpath(*PurePosixPath(entry.dir).parts)
+            ok = False
+            if src.is_dir():
+                try:
+                    shutil.copytree(src, dest, dirs_exist_ok=True)
+                    ok = True
+                except Exception:
+                    ok = False
+            report.append(
+                f"boilerplate {'ok' if ok else 'FAIL'} dir {entry.dir} -> {entry.into}"
+            )
+        else:
+            report.append(f"boilerplate skip ({entry.into}: neither from nor dir)")
+    return report
+
+
 def install_distribution(
     source: str,
     name: Optional[str] = None,
     force: bool = False,
     create_alias: bool = False,
+    with_programs: bool = False,
 ) -> InstallPlan:
     """Install a distribution from *source* into a new profile.
 
     Returns the resolved :class:`InstallPlan`.  Use :func:`plan_install`
     first if you want to preview + prompt the user before calling this.
+
+    ``with_programs`` (or ``HERMES_PROFILE_WITH_PROGRAMS=1``) opts in to running
+    the manifest's ``programs`` block (apt/pip/npm/run); boilerplate is always
+    seeded (data only, seed-if-empty).
     """
     from hermes_cli.profiles import (
         check_alias_collision,
@@ -694,6 +1029,13 @@ def install_distribution(
             preserve_config=False,
         )
 
+        # v2 provisioning — no-op when the manifest declares neither field.
+        plan.boilerplate_report = _seed_boilerplate(
+            plan.staged_dir, plan.target_dir, plan.manifest
+        )
+        if _programs_enabled(with_programs):
+            plan.programs_report = _install_programs(plan.target_dir, plan.manifest)
+
         if create_alias:
             collision = check_alias_collision(plan.manifest.name)
             if collision is None:
@@ -705,6 +1047,7 @@ def install_distribution(
 def update_distribution(
     profile_name: str,
     force_config: bool = False,
+    with_programs: bool = False,
 ) -> InstallPlan:
     """Re-pull the distribution for an existing profile and apply updates.
 
@@ -712,6 +1055,11 @@ def update_distribution(
     ``source:`` field.  Distribution-owned files are overwritten; user-owned
     data (memories, sessions, auth) is never touched.  ``config.yaml`` is
     preserved unless ``force_config`` is True.
+
+    ``programs`` reinstall only when the distribution version bumped (the
+    version-keyed marker skips an unchanged version); ``boilerplate`` is
+    re-seeded only where the target is still empty. ``with_programs`` (or
+    ``HERMES_PROFILE_WITH_PROGRAMS=1``) gates the programs step as on install.
     """
     from hermes_cli.profiles import (
         get_profile_dir,
@@ -751,6 +1099,13 @@ def update_distribution(
             plan.manifest,
             preserve_config=plan.preserves_config,
         )
+
+        # v2 provisioning — no-op when the manifest declares neither field.
+        plan.boilerplate_report = _seed_boilerplate(
+            plan.staged_dir, plan.target_dir, plan.manifest
+        )
+        if _programs_enabled(with_programs):
+            plan.programs_report = _install_programs(plan.target_dir, plan.manifest)
         return plan
 
 

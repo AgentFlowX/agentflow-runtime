@@ -170,6 +170,11 @@ def build_profile_parser(subparsers, *, cmd_profile: Callable) -> None:
         help="Overwrite an existing profile of the same name (user data preserved)",
     )
     profile_install.add_argument(
+        "--with-programs", dest="with_programs", action="store_true",
+        help="Run the manifest's programs block (apt/pip/npm/run). Off by "
+             "default because those steps execute arbitrary code",
+    )
+    profile_install.add_argument(
         "-y", "--yes", action="store_true",
         help="Skip manifest preview confirmation",
     )
@@ -188,6 +193,11 @@ def build_profile_parser(subparsers, *, cmd_profile: Callable) -> None:
     profile_update.add_argument(
         "--force-config", action="store_true",
         help="Also overwrite config.yaml (normally preserved to keep user overrides)",
+    )
+    profile_update.add_argument(
+        "--with-programs", dest="with_programs", action="store_true",
+        help="Run the manifest's programs block (apt/pip/npm/run) on update. Off "
+             "by default because those steps execute arbitrary code",
     )
     profile_update.add_argument(
         "-y", "--yes", action="store_true",
