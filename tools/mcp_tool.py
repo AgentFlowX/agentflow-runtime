@@ -5438,8 +5438,11 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
             _mark_proven = getattr(server, "_mark_session_proven", None)
             if _mark_proven is not None:
                 _mark_proven()
-            # MCP CallToolResult has .content (list of content blocks) and .isError
-            if result.isError:
+            # MCP CallToolResult carries .content (list of content blocks) and the
+            # error flag. The mcp SDK renamed it camelCase→snake_case across versions
+            # (isError → is_error), so read whichever exists — accessing a fixed name
+            # AttributeError'd on every tool call under the newer SDK (#mcp-iserror).
+            if getattr(result, "is_error", None) or getattr(result, "isError", None):
                 error_text = ""
                 for block in (result.content or []):
                     if getattr(block, "text", None):
