@@ -878,7 +878,8 @@ class TestInstallProvisioning:
             "  - into: workspace/studio\n"
             "    dir: bp\n"
             "programs:\n"
-            '  run: "echo hi > ranfile"\n'
+            # run cwd is the profile ROOT, so a relative path lands under workspace/
+            '  run: "echo hi > workspace/ranfile"\n'
         )
         return staged
 
@@ -906,6 +907,7 @@ class TestInstallProvisioning:
         src = self._v2_dist(tmp_path)
         plan = install_distribution(str(src), name="prov")
         tgt = plan.target_dir
+        # run executed from the profile ROOT (relative path resolved under workspace/)
         assert (tgt / "workspace" / "ranfile").read_text().strip() == "hi"
         assert [m.name for m in tgt.glob(".programs-installed@*")] == [".programs-installed@1.0.0"]
         # idempotent: same version skips

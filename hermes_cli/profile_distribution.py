@@ -899,10 +899,10 @@ def _install_programs(
         ok = _run_best_effort(["npm", "install", "-g", mod])
         report.append(f"npm {'ok' if ok else 'FAIL'} {mod}")
     if programs.run:
-        wd = target / "workspace"
-        if not wd.is_dir():
-            wd = target
-        ok = _run_best_effort(programs.run, cwd=wd, shell=True)
+        # cwd = profile ROOT — the same coordinate system boilerplate `into:`
+        # uses, so an author writes `cd workspace/studio && …` (not a bare
+        # `cd studio`). Predictable and matches where seeded scaffolding lands.
+        ok = _run_best_effort(programs.run, cwd=target, shell=True)
         report.append(f"run {'ok' if ok else 'FAIL'}")
 
     try:
