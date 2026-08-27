@@ -314,6 +314,11 @@ class DistributionManifest:
     # needs; ``boilerplate`` = scaffold seeded into empty profile paths.
     programs: Optional["ProgramsSpec"] = None
     boilerplate: List["BoilerplateEntry"] = field(default_factory=list)
+    # Storefront/catalog metadata (tier, price, showcase, onboarding, config…).
+    # OPAQUE to Hermes — never read or acted on here; carried through round-trips
+    # so the control-plane can sync the vitrine catalog straight from this one
+    # manifest (see AgentFlow: distribution.yaml is the single source of truth).
+    vitrine: Optional[Dict[str, Any]] = None
     # Tracked after install — where we pulled from, so ``update`` can re-pull.
     source: str = ""
     # ISO-8601 UTC timestamp written on install / update, so ``info`` and
@@ -344,6 +349,8 @@ class DistributionManifest:
         if boilerplate_raw and not isinstance(boilerplate_raw, list):
             raise DistributionError("boilerplate must be a list")
         boilerplate = [BoilerplateEntry.from_dict(b) for b in boilerplate_raw]
+        vitrine_raw = data.get("vitrine")
+        vitrine = vitrine_raw if isinstance(vitrine_raw, dict) else None
         return cls(
             name=name,
             version=str(data.get("version") or "0.1.0"),
@@ -355,6 +362,7 @@ class DistributionManifest:
             distribution_owned=distribution_owned,
             programs=programs,
             boilerplate=boilerplate,
+            vitrine=vitrine,
             source=str(data.get("source") or ""),
             installed_at=str(data.get("installed_at") or ""),
         )
@@ -382,6 +390,8 @@ class DistributionManifest:
             out["programs"] = self.programs.to_dict()
         if self.boilerplate:
             out["boilerplate"] = [b.to_dict() for b in self.boilerplate]
+        if self.vitrine:
+            out["vitrine"] = self.vitrine
         if self.source:
             out["source"] = self.source
         if self.installed_at:

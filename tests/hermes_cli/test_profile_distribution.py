@@ -139,6 +139,25 @@ class TestManifestParsing:
         assert parsed.name == "rt"
         assert parsed.env_requires[0].name == "FOO"
 
+    def test_vitrine_block_is_opaque_and_roundtrips(self):
+        # The control-plane catalog fields ride along in `vitrine`. Hermes must
+        # neither act on them nor drop them — a manifest with a vitrine block
+        # parses cleanly and re-serializes it byte-for-byte.
+        vit = {"tier": "premium", "price": 1500, "category": "video",
+               "showcase": {"cover": "assets/cover.jpg"}}
+        m = DistributionManifest.from_dict(
+            {"name": "vt", "version": "1.0.0", "vitrine": vit}
+        )
+        assert m.vitrine == vit
+        assert m.to_dict()["vitrine"] == vit
+        # A totally unknown key is ignored, never fatal.
+        m2 = DistributionManifest.from_dict(
+            {"name": "vt", "version": "1.0.0", "some_future_key": [1, 2, 3]}
+        )
+        assert m2.name == "vt"
+        assert m2.vitrine is None
+        assert "some_future_key" not in m2.to_dict()
+
 
 # ===========================================================================
 # Version requirement checks
