@@ -989,6 +989,37 @@ def _seed_boilerplate(
     return report
 
 
+def _merge_mcp_into_config(target: Path) -> None:
+    """Merge a distribution's ``mcp.json`` mcp_servers into ``config.yaml``.
+
+    Hermes reads MCP servers from config.yaml's ``mcp_servers`` key; the
+    Cursor-style ``mcp.json`` a distribution ships is otherwise never loaded, so
+    its servers silently never register. Bridge it here (idempotent, best-effort)
+    so an installed profile's MCP tools actually come up.
+    """
+    mj = target / "mcp.json"
+    if not mj.is_file():
+        return
+    try:
+        import json as _json
+        import yaml as _yaml
+
+        data = _json.loads(mj.read_text(encoding="utf-8"))
+        servers = data.get("mcp_servers") or data.get("mcpServers")
+        if not servers or not isinstance(servers, dict):
+            return
+        cfg_path = target / "config.yaml"
+        cfg = {}
+        if cfg_path.is_file():
+            cfg = _yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        cfg["mcp_servers"] = servers
+        from utils import atomic_yaml_write
+
+        atomic_yaml_write(cfg_path, cfg, sort_keys=False, default_flow_style=False, create_mode=0o644)
+    except Exception:
+        pass
+
+
 def install_distribution(
     source: str,
     name: Optional[str] = None,
@@ -1028,6 +1059,7 @@ def install_distribution(
             plan.manifest,
             preserve_config=False,
         )
+        _merge_mcp_into_config(plan.target_dir)
 
         # v2 provisioning — no-op when the manifest declares neither field.
         plan.boilerplate_report = _seed_boilerplate(
@@ -1099,6 +1131,7 @@ def update_distribution(
             plan.manifest,
             preserve_config=plan.preserves_config,
         )
+        _merge_mcp_into_config(plan.target_dir)
 
         # v2 provisioning — no-op when the manifest declares neither field.
         plan.boilerplate_report = _seed_boilerplate(
