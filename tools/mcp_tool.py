@@ -554,13 +554,27 @@ def _context_var_value(ref: str) -> Optional[str]:
     """Resolve Cursor-style context variables in ``${...}`` references.
 
     Supports the case-sensitive names Cursor's ``mcp.json`` interpolation
-    understands beyond env vars: ``${userHome}``, ``${workspaceFolder}``,
+    understands beyond env vars: ``${userHome}``, ``${hermesHome}`` /
+    ``${profileHome}`` (multiplex-aware current profile home), ``${workspaceFolder}``,
     ``${workspaceFolderBasename}``, ``${pathSeparator}`` and its ``${/}``
     shorthand. Returns ``None`` for anything else so unknown references keep
     the existing env-var lookup semantics.
     """
     if ref == "userHome":
         return os.path.expanduser("~")
+    if ref in ("hermesHome", "profileHome"):
+        # The CURRENT Hermes home — context-local override aware, so under
+        # multiplex it resolves to the running profile's dir (profiles/<id>),
+        # and to ~/.hermes for a single-profile agent. A distribution's mcp.json
+        # references its own skills as ${hermesHome}/skills/<skill>/... so the
+        # path is correct regardless of the profile NAME it was installed under
+        # (which the distribution can't know).
+        try:
+            from hermes_constants import get_hermes_home
+
+            return str(get_hermes_home())
+        except Exception:
+            return None
     if ref == "workspaceFolder":
         return _workspace_folder()
     if ref == "workspaceFolderBasename":
