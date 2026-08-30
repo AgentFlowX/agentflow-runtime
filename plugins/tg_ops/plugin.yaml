@@ -1,0 +1,21 @@
+name: tg_ops
+version: 0.1.0
+description: "Native Telegram-userbot primitives — own/buy accounts and talk to people from one or many accounts (send + multi-account inbound poll + conversation history), with no campaign and no warmup gate. Mailing/warmup are separate opt-in modules that build on the same tables."
+author: AgentFlow
+kind: backend
+tags:
+  - telegram
+  - userbot
+  - primitives
+pip_dependencies:
+  - telethon
+  - sqlmodel
+python_dependencies:
+  - telethon
+  - sqlmodel
+provides_tools:
+  - tg_account_add
+  - tg_account_list
+  - tg_send
+  - tg_poll
+  - tg_conversations
