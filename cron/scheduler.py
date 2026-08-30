@@ -140,11 +140,10 @@ def _fallback_chain_phrase() -> str:
     except Exception:
         return "Fallback chain was exhausted or unavailable."
     if chain:
-        return "Fallback chain was exhausted or unavailable."
+        return "Резервные модели тоже недоступны."
     return (
-        "No fallback chain configured — add one with `hermes fallback add`, "
-        "or set a cron fleet default via `cron.model` + `cron.model_provider` "
-        "in config.yaml."
+        "Резервная модель не настроена. Добавьте fallback через `hermes fallback add` "
+        "или задайте модель для cron в config.yaml."
     )
 
 
@@ -270,9 +269,9 @@ def _summarize_cron_failure_for_delivery(job: dict, error: str | None) -> str:
         "readtimeout" in lower or "timed out" in lower or "timeout" in lower
     ):
         return (
-            f"⚠️ Cron '{job_name}' failed: provider timeout. "
+            f"⚠️ Задача по расписанию «{job_name}» не выполнилась: модель не ответила вовремя. "
             f"{_fallback_chain_phrase()} "
-            "Full details saved in cron output."
+            "Подробности сохранены в журнале задачи."
         )
 
     # Match authentication/authorization wording at a word boundary and the
