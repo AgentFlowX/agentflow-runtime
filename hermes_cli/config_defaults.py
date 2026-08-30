@@ -649,28 +649,20 @@ DEFAULT_CONFIG = {
                                       # surfaces (server-side logging only). Failure
                                       # notices and manual /compress feedback are
                                       # always visible regardless of this setting.
-        "threshold": 0.50,            # compress when context usage exceeds this ratio.
-                                      # Models with context windows below 512K are
-                                      # floored at 0.75 (raise-only) so compaction
-                                      # doesn't fire with half the window still free;
-                                      # set this above 0.75 to override the floor.
+        "threshold": 0.80,            # compact before the provider context limit
+                                      # so the active turn is not sacrificed to a late overflow.
         "threshold_tokens": None,     # absolute token cap — when set, compression
                                       # triggers at the lower of the ratio-based
                                       # threshold and this token count. Clamped to
                                       # the model's context length at apply-time.
-        "target_ratio": 0.20,         # fraction of threshold to preserve as recent tail
+        "target_ratio": 0.50,         # retain a compact 50% target after compaction
         "tail_mode": "legacy",        # tail retention policy (#87326):
-                                      #   "legacy" — 0.20×window verbatim tail (default)
+                                      #   "legacy" — token-budget tail with the
+                                      #              explicit protect_last_n floor
                                       #   "lean"   — clamped 2.5%-of-window tail
-                                      #              (10K floor / 25K cap) plus chunked
-                                      #              digests, a mechanical anchor index,
-                                      #              verbatim user messages, and
-                                      #              session_search recovery pointers in
-                                      #              the summary. ~3x fewer retained
-                                      #              tokens after compaction; costs a few
-                                      #              extra summarizer calls at the
-                                      #              compaction boundary.
-        "protect_last_n": 20,         # minimum recent messages to keep uncompressed
+                                      #              plus recovery pointers.
+        "protect_last_n": 4,          # keep the latest four messages verbatim
+                                      # (tool-pair alignment may retain more).
         "min_tail_user_messages": 1,  # REAL (actionable) user messages guaranteed to
                                       # survive in the uncompressed tail. 1 = existing
                                       # single last-user anchor (default, behavior-
@@ -705,18 +697,13 @@ DEFAULT_CONFIG = {
                                       # for a full trigger-sized token runway to
                                       # regrow before rearming. Keeps prompt-cache
                                       # breaks episodic. 0 = no minimum-savings gate.
-        "micro_compact": False,       # opt-in: after each completed turn, fold the
-                                      # oldest un-absorbed exchange into a rolling
-                                      # summary, amortizing compression cost instead
-                                      # of paying it in one batch stall. Default False
-                                      # because a pass rewrites already-sent history
-                                      # and so breaks the provider prompt-cache prefix
-                                      # EVERY turn — the per-turn cache break that
-                                      # `proactive_prune_min_reclaim_tokens` above
-                                      # exists to avoid. Enable only when you have
-                                      # measured that the amortized stall is worth
-                                      # more to you than the cached-prefix discount.
-                                      # See docs/micro-compaction.md.
+        "micro_compact": True,        # enabled by default: fold the oldest
+                                      # unabsorbed exchange into the rolling summary
+                                      # so bulky tool results are reclaimed early.
+                                      # Compression is already the explicit cache-
+                                      # breaking exception; the early reclaim keeps
+                                      # long-running gateway sessions below the hard
+                                      # context boundary.
         "micro_compact_every_n_turns": 1,  # cadence: run a pass every Nth completed
                                       # turn. Since each pass costs one prompt-cache
                                       # break, this is the dial for how often that
