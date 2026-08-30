@@ -920,6 +920,13 @@ class TelegramAdapter(BasePlatformAdapter):
     def _mark_connected(self) -> None:
         self._drop_delayed_deliveries = False
         super()._mark_connected()
+        marker = os.environ.get("HERMES_TELEGRAM_READINESS_MARKER", "")
+        if marker:
+            try:
+                _Path(marker).parent.mkdir(parents=True, exist_ok=True)
+                _Path(marker).touch()
+            except Exception:
+                logger.warning("[%s] Could not write Telegram readiness marker", self.name, exc_info=True)
         # Drain anything held while we were down. PTB will not redeliver —
         # these events exist only in our hold queue now.
         self._schedule_held_inbound_redispatch()
@@ -927,6 +934,12 @@ class TelegramAdapter(BasePlatformAdapter):
     def _mark_disconnected(self) -> None:
         self._drop_delayed_deliveries = True
         super()._mark_disconnected()
+        marker = os.environ.get("HERMES_TELEGRAM_READINESS_MARKER", "")
+        if marker:
+            try:
+                _Path(marker).unlink(missing_ok=True)
+            except Exception:
+                logger.debug("[%s] Could not remove Telegram readiness marker", self.name, exc_info=True)
 
     def _set_fatal_error(self, code: str, message: str, *, retryable: bool) -> None:
         self._drop_delayed_deliveries = True
