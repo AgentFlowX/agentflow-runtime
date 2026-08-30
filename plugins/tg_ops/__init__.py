@@ -54,6 +54,27 @@ def _h_account_list(args: dict, **_kw) -> str:
         return tool_error(str(e))
 
 
+async def _h_qr_start(args: dict, **_kw) -> str:
+    from .core import qr
+    try:
+        r = await qr.qr_start(proxy=args.get("proxy"), country=args.get("country"))
+        return tool_result(r)
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
+async def _h_qr_confirm(args: dict, **_kw) -> str:
+    from .core import qr
+    try:
+        if not args.get("token"):
+            return tool_error("token required (from tg_account_qr_start)")
+        r = await qr.qr_confirm(args["token"], password=args.get("password"),
+                                timeout=int(args.get("timeout", 30)))
+        return tool_result(r)
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
 async def _h_send(args: dict, **_kw) -> str:
     from .core import messaging
     try:
@@ -118,6 +139,34 @@ _S_ACCOUNT_LIST = {
         },
     },
 }
+_S_QR_START = {
+    "name": "tg_account_qr_start",
+    "description": "Start connecting the USER'S OWN Telegram account via QR. Returns a qr_url (and qr_png if "
+                   "renderable) to show the user — they scan it in Telegram → Settings → Devices → Link Device. "
+                   "Then call tg_account_qr_confirm with the returned token. Own accounts are never warmed.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "proxy": {"type": "string", "description": "optional socks5://user:pass@host:port"},
+            "country": {"type": "string", "description": "optional ISO-2 country for the proxy/account"},
+        },
+    },
+}
+_S_QR_CONFIRM = {
+    "name": "tg_account_qr_confirm",
+    "description": "Finish a QR login started by tg_account_qr_start. Poll this after the user scans. Returns the "
+                   "registered own account on success; {need_password:true} if the account has 2FA (call again with "
+                   "password); {not_scanned_yet, qr_url} if still waiting (show the refreshed QR).",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "token": {"type": "string", "description": "token from tg_account_qr_start"},
+            "password": {"type": "string", "description": "2FA password, only if need_password was returned"},
+            "timeout": {"type": "integer", "description": "seconds to wait for the scan this call (default 30)"},
+        },
+        "required": ["token"],
+    },
+}
 _S_SEND = {
     "name": "tg_send",
     "description": "Send a message to a person from a specific account. Creates or updates the Conversation "
@@ -162,6 +211,8 @@ _S_CONVERSATIONS = {
 }
 
 _TOOLS = (
+    ("tg_account_qr_start",   _S_QR_START,    _h_qr_start,     True,  "📲"),
+    ("tg_account_qr_confirm", _S_QR_CONFIRM,  _h_qr_confirm,   True,  "✅"),
     ("tg_account_add",   _S_ACCOUNT_ADD,   _h_account_add,   True,  "➕"),
     ("tg_account_list",  _S_ACCOUNT_LIST,  _h_account_list,  False, "📇"),
     ("tg_send",          _S_SEND,          _h_send,          True,  "✉️"),

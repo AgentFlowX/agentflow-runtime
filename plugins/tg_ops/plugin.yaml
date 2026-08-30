@@ -10,10 +10,16 @@ tags:
 pip_dependencies:
   - telethon
   - sqlmodel
+  - qrcode        # optional: render the login QR to PNG (best-effort, falls back to url)
+  - pillow
 python_dependencies:
   - telethon
   - sqlmodel
+  - qrcode
+  - pillow
 provides_tools:
+  - tg_account_qr_start
+  - tg_account_qr_confirm
   - tg_account_add
   - tg_account_list
   - tg_send
