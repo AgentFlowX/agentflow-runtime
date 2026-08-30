@@ -5438,8 +5438,14 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
             _mark_proven = getattr(server, "_mark_session_proven", None)
             if _mark_proven is not None:
                 _mark_proven()
-            # MCP CallToolResult has .content (list of content blocks) and .isError
-            if result.isError:
+            # MCP SDK releases have used both camelCase ``isError`` and
+            # snake_case ``is_error`` on CallToolResult. Treat a missing field
+            # as a successful transport result; never let response-shape drift
+            # turn a valid marketplace response into an AttributeError.
+            is_error = bool(
+                getattr(result, "isError", getattr(result, "is_error", False))
+            )
+            if is_error:
                 error_text = ""
                 for block in (result.content or []):
                     if getattr(block, "text", None):

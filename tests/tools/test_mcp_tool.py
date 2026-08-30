@@ -563,6 +563,25 @@ class TestToolHandler:
             mock_session.call_tool.assert_called_once_with("greet", arguments={"name": "world"})
         finally:
             _servers.pop("test_srv", None)
+    def test_successful_call_without_is_error_attribute(self):
+        """Newer MCP SDK CallToolResult omits camelCase ``isError``."""
+        from tools.mcp_tool import _make_tool_handler, _servers
+
+        mock_session = MagicMock()
+        block = SimpleNamespace(text="market catalog available")
+        mock_session.call_tool = AsyncMock(
+            return_value=SimpleNamespace(content=[block])
+        )
+        server = _make_mock_server("test_srv", session=mock_session)
+        _servers["test_srv"] = server
+
+        try:
+            handler = _make_tool_handler("test_srv", "market_search", 120)
+            with self._patch_mcp_loop():
+                result = json.loads(handler({"category": "telegram"}))
+            assert result["result"] == "market catalog available"
+        finally:
+            _servers.pop("test_srv", None)
 
 
     def test_recycled_stdio_server_reconnects_lazily_on_tool_call(self):
