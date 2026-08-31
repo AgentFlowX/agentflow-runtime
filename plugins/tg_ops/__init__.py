@@ -55,21 +55,22 @@ def _h_account_list(args: dict, **_kw) -> str:
 
 
 async def _h_qr_start(args: dict, **_kw) -> str:
-    from .core import qr
+    import asyncio
+    from .core import qrmanager
     try:
-        r = await qr.qr_start(proxy=args.get("proxy"), country=args.get("country"))
+        r = await asyncio.to_thread(qrmanager.submit, args.get("country"))
         return tool_result(r)
     except Exception as e:  # noqa: BLE001
         return tool_error(str(e))
 
 
 async def _h_qr_confirm(args: dict, **_kw) -> str:
-    from .core import qr
+    import asyncio
+    from .core import qrmanager
     try:
         if not args.get("token"):
             return tool_error("token required (from tg_account_qr_start)")
-        r = await qr.qr_confirm(args["token"], password=args.get("password"),
-                                timeout=int(args.get("timeout", 30)))
+        r = await asyncio.to_thread(qrmanager.poll, args["token"], args.get("password"))
         return tool_result(r)
     except Exception as e:  # noqa: BLE001
         return tool_error(str(e))
