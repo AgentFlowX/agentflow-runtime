@@ -19,19 +19,8 @@ python_dependencies:
   - pillow
 provides_tools:
   - tg_account_qr_start
-  - tg_account_qr_confirm
-  - tg_account_add
-  - tg_account_list
-  - tg_send
-  - tg_send_media
-  - tg_poll
-  - tg_conversations
-  - tg_search
-  - tg_dialogs
-  - tg_read
-  - tg_participants
-  - tg_join
   - tg_create_bot
+  - tg_send_media
   - tg_exec
   - tg_tool_define
   - tg_tool_run
@@ -42,3 +31,15 @@ provides_tools:
   - tg_autopilot_stop
   - tg_autopilot_status
   - tg_conversation_auto
+  - tg_search
+  - tg_dialogs
+  - tg_read
+  - tg_participants
+  - tg_join
+  - tg_account_qr_confirm
+  - tg_account_add
+  - tg_account_list
+  - tg_account_remove
+  - tg_send
+  - tg_poll
+  - tg_conversations

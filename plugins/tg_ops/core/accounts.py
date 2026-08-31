@@ -15,7 +15,7 @@ from typing import Optional
 from sqlmodel import select
 
 from .db import (
-    Account, AccountSource, AccountStatus, WarmupPhase, Proxy,
+    Account, AccountSource, AccountStatus, WarmupPhase, Proxy, Conversation, Message,
     default_app_id, default_app_hash, get_session, now, log_action,
 )
 from . import pool, tgclient
@@ -114,6 +114,40 @@ async def add_account(session_str: str, *, source: str = "bought", proxy: Option
     await asyncio.to_thread(_fill)
     log_action(account_id, "ingest", source, ok=True)
     return {"ok": True, "account_id": account_id, "source": source, "me": me}
+
+
+async def remove_account(account_id: int, logout: bool = True) -> dict:
+    """Disconnect + remove an account. logout=true logs the session OUT (revokes it on
+    Telegram — our linked device disappears from the user's Devices); then drops the
+    pooled client and deletes the account + its conversations from the engine."""
+    logged_out = False
+    if logout:
+        try:
+            client = await pool.get(account_id)
+            await client.log_out()          # revokes the session AND disconnects
+            logged_out = True
+        except Exception:  # noqa: BLE001 — dead/absent session: nothing to revoke, still remove
+            pass
+    await pool.close(account_id)
+
+    def _delete() -> bool:
+        with get_session() as s:
+            acc = s.get(Account, account_id)
+            if acc is None:
+                return False
+            for c in s.exec(select(Conversation).where(Conversation.account_id == account_id)).all():
+                for m in s.exec(select(Message).where(Message.conversation_id == c.id)).all():
+                    s.delete(m)
+                s.delete(c)
+            s.delete(acc)
+            s.commit()
+            return True
+
+    removed = await asyncio.to_thread(_delete)
+    log_action(account_id, "remove", f"logout={logged_out}", ok=removed)
+    if not removed:
+        return {"ok": False, "error": "account not found", "account_id": account_id}
+    return {"ok": True, "account_id": account_id, "logged_out": logged_out}
 
 
 def list_accounts(source: Optional[str] = None, status: Optional[str] = None,

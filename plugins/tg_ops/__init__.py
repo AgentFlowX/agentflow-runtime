@@ -54,6 +54,15 @@ def _h_account_list(args: dict, **_kw) -> str:
         return tool_error(str(e))
 
 
+async def _h_account_remove(args: dict, **_kw) -> str:
+    from .core import accounts
+    try:
+        return tool_result(await accounts.remove_account(
+            int(args["account_id"]), logout=bool(args.get("logout", True))))
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
 async def _h_qr_start(args: dict, **_kw) -> str:
     import asyncio
     from .core import qrmanager
@@ -334,6 +343,15 @@ _S_QR_CONFIRM = {
         "required": ["token"],
     },
 }
+_S_ACCOUNT_REMOVE = {
+    "name": "tg_account_remove",
+    "description": "Disconnect + remove an account. logout=true (default) logs the session OUT — revokes it on "
+                   "Telegram so our linked device disappears from the user's Settings → Devices — then deletes the "
+                   "account and its conversations from the engine. logout=false only removes it locally.",
+    "parameters": {"type": "object", "properties": {
+        "account_id": {"type": "integer"}, "logout": {"type": "boolean"}},
+        "required": ["account_id"]},
+}
 _S_SEND = {
     "name": "tg_send",
     "description": "Send a message to a person from a specific account. Creates or updates the Conversation "
@@ -523,6 +541,7 @@ _TOOLS = (
     ("tg_account_qr_confirm", _S_QR_CONFIRM,  _h_qr_confirm,   True,  "✅"),
     ("tg_account_add",   _S_ACCOUNT_ADD,   _h_account_add,   True,  "➕"),
     ("tg_account_list",  _S_ACCOUNT_LIST,  _h_account_list,  False, "📇"),
+    ("tg_account_remove", _S_ACCOUNT_REMOVE, _h_account_remove, True, "🔌"),
     ("tg_send",          _S_SEND,          _h_send,          True,  "✉️"),
     ("tg_poll",          _S_POLL,          _h_poll,          True,  "📥"),
     ("tg_conversations", _S_CONVERSATIONS, _h_conversations, False, "💬"),
