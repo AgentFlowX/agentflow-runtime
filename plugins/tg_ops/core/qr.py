@@ -24,8 +24,9 @@ from typing import Optional
 from telethon import TelegramClient, errors
 from telethon.sessions import StringSession
 
-from . import tgclient, accounts
+from . import tgclient, accounts, proxylease, fingerprints
 from .db import default_app_id, default_app_hash
+import json
 
 _pending: dict[str, dict] = {}
 _PENDING_TTL = 600  # seconds a pending QR client is kept before GC
@@ -57,23 +58,36 @@ def _render_png(url: str, token: str) -> Optional[str]:
 
 async def qr_start(proxy: Optional[str] = None, country: Optional[str] = None,
                    app_id: Optional[int] = None, app_hash: Optional[str] = None) -> dict:
-    """Begin a QR login. Returns {ok, token, qr_url, qr_png?, hint}."""
-    proxy_tuple = None
-    if proxy:
-        proxy_tuple = tgclient.parse_proxy(accounts._parse_proxy(proxy, country))
+    """Begin a QR login. Returns {ok, token, qr_url, qr_png?, hint}.
+
+    🔴 The pod can't reach Telegram directly (NetworkPolicy) — so if no proxy is
+    given we LEASE one (country-matched), and we ALWAYS build the login client with a
+    coherent desktop DEVICE fingerprint. Both the proxy and the device are carried
+    onto the account so every later connection stays consistent (device = identity)."""
+    # 1) ensure a proxy — direct connect is blocked, that's what makes a QR "invalid"
+    if not proxy:
+        proxy = await asyncio.to_thread(proxylease.lease, country)
+    proxy_tuple = tgclient.parse_proxy(accounts._parse_proxy(proxy, country)) if proxy else None
+    # 2) coherent desktop device (Telethon default library signature = obvious tell)
+    prefer = "ru" if (country or "").lower() in ("kz", "uz", "by", "ru") else None
+    device = fingerprints.pick_fingerprint(int(time.time()) % 100000, prefer_lang=prefer)
+    dev_kwargs = fingerprints.as_client_kwargs(device)
     client = TelegramClient(StringSession(), int(app_id or default_app_id()),
-                            app_hash or default_app_hash(), proxy=proxy_tuple)
+                            app_hash or default_app_hash(), proxy=proxy_tuple, **dev_kwargs)
     await client.connect()
     qr = await client.qr_login()
     token = secrets.token_urlsafe(9)
-    _pending[token] = {"client": client, "qr": qr, "proxy": proxy,
-                       "country": country, "created": time.monotonic()}
+    _pending[token] = {"client": client, "qr": qr, "proxy": proxy, "country": country,
+                       "device": json.dumps(device), "created": time.monotonic()}
     _gc()
     res = {
         "ok": True, "token": token, "qr_url": qr.url,
+        "via_proxy": bool(proxy), "device": device.get("device_model"),
         "hint": "Покажи QR юзеру (Telegram → Настройки → Устройства → Подключить устройство), "
                 "затем вызови tg_account_qr_confirm с этим token.",
     }
+    if not proxy:
+        res["warning"] = "прокси не арендован (PROXY_URL не настроен) — QR может не работать с пода"
     png = _render_png(qr.url, token)
     if png:
         res["qr_png"] = png
@@ -157,7 +171,8 @@ async def qr_confirm(token: str, password: Optional[str] = None, timeout: int = 
 async def _finalize(token: str, client, p: dict) -> dict:
     """Export the authorized session and register it as the user's own account."""
     session_str = client.session.save()
-    proxy, country = p.get("proxy"), p.get("country")
+    proxy, country, device = p.get("proxy"), p.get("country"), p.get("device")
     await tgclient.disconnect(client)
     _pending.pop(token, None)
-    return await accounts.add_account(session_str, source="own", proxy=proxy, country=country)
+    return await accounts.add_account(session_str, source="own", proxy=proxy,
+                                      country=country, device=device)
