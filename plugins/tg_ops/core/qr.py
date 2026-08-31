@@ -88,6 +88,17 @@ async def qr_confirm(token: str, password: Optional[str] = None, timeout: int = 
         return {"ok": False, "error": "unknown_or_expired_token"}
     client, qr = p["client"], p["qr"]
 
+    # 1) 🔴 The user may have ALREADY scanned before we polled — check first. This is
+    #    the fix for "connected but the agent didn't notice and started over".
+    try:
+        if await client.is_user_authorized():
+            return await _finalize(token, client, p)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 2) Wait for the scan. NEVER recreate the QR on a plain timeout — that throws away
+    #    a QR the user may be scanning right now (the old destructive bug). Only refresh
+    #    when the code has actually EXPIRED.
     try:
         await qr.wait(timeout)
     except errors.SessionPasswordNeededError:
@@ -98,20 +109,39 @@ async def qr_confirm(token: str, password: Optional[str] = None, timeout: int = 
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": f"bad_password: {e}", "token": token}
     except asyncio.TimeoutError:
-        # not scanned in time — refresh the code and hand back a new QR
+        # maybe it authorized right as we timed out
         try:
-            await qr.recreate()
-        except Exception:
+            if await client.is_user_authorized():
+                return await _finalize(token, client, p)
+        except Exception:  # noqa: BLE001
             pass
-        out = {"ok": False, "error": "not_scanned_yet", "token": token, "qr_url": qr.url}
+        expired = False
+        try:
+            if qr.expires is not None:
+                expired = qr.expires.timestamp() <= time.time()
+        except Exception:  # noqa: BLE001
+            expired = False
+        if expired:
+            try:
+                await qr.recreate()
+            except Exception:  # noqa: BLE001
+                pass
+        out = {"ok": False, "error": "qr_expired_refreshed" if expired else "not_scanned_yet",
+               "token": token, "qr_url": qr.url}
         png = _render_png(qr.url, token)
         if png:
             out["qr_png"] = png
         return out
     except Exception as e:  # noqa: BLE001
+        # a raise during wait doesn't always mean failure — re-check auth
+        try:
+            if await client.is_user_authorized():
+                return await _finalize(token, client, p)
+        except Exception:  # noqa: BLE001
+            pass
         return {"ok": False, "error": str(e), "token": token}
 
-    # scanned — 2FA may still be pending
+    # 3) wait returned — 2FA may still be pending
     if not await client.is_user_authorized():
         if password:
             try:
@@ -121,9 +151,13 @@ async def qr_confirm(token: str, password: Optional[str] = None, timeout: int = 
         if not await client.is_user_authorized():
             return {"ok": False, "need_password": True, "token": token}
 
+    return await _finalize(token, client, p)
+
+
+async def _finalize(token: str, client, p: dict) -> dict:
+    """Export the authorized session and register it as the user's own account."""
     session_str = client.session.save()
-    proxy, country = p["proxy"], p["country"]
+    proxy, country = p.get("proxy"), p.get("country")
     await tgclient.disconnect(client)
     _pending.pop(token, None)
-    # register as OWN (reconnect+verify+fill identity via the normal path)
     return await accounts.add_account(session_str, source="own", proxy=proxy, country=country)

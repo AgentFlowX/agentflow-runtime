@@ -25,3 +25,8 @@ provides_tools:
   - tg_send
   - tg_poll
   - tg_conversations
+  - tg_search
+  - tg_dialogs
+  - tg_read
+  - tg_participants
+  - tg_join

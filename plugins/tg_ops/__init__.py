@@ -108,6 +108,53 @@ def _h_conversations(args: dict, **_kw) -> str:
         return tool_error(str(e))
 
 
+async def _h_search(args: dict, **_kw) -> str:
+    from .core import ops
+    try:
+        if not args.get("query"):
+            return tool_error("query required")
+        return tool_result({"results": await ops.search_public(
+            int(args["account_id"]), args["query"], limit=int(args.get("limit", 20)))})
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
+async def _h_dialogs(args: dict, **_kw) -> str:
+    from .core import ops
+    try:
+        return tool_result({"dialogs": await ops.list_dialogs(
+            int(args["account_id"]), limit=int(args.get("limit", 50)))})
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
+async def _h_read(args: dict, **_kw) -> str:
+    from .core import ops
+    try:
+        return tool_result({"messages": await ops.read_peer(
+            int(args["account_id"]), args["peer"], limit=int(args.get("limit", 30)))})
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
+async def _h_participants(args: dict, **_kw) -> str:
+    from .core import ops
+    try:
+        return tool_result({"members": await ops.participants(
+            int(args["account_id"]), args["peer"], limit=int(args.get("limit", 100)),
+            search=args.get("search", ""))})
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
+async def _h_join(args: dict, **_kw) -> str:
+    from .core import ops
+    try:
+        return tool_result(await ops.join(int(args["account_id"]), args["peer"]))
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
 # --- schemas -----------------------------------------------------------------
 _S_ACCOUNT_ADD = {
     "name": "tg_account_add",
@@ -210,8 +257,56 @@ _S_CONVERSATIONS = {
     },
 }
 
+_S_SEARCH = {
+    "name": "tg_search",
+    "description": "Search PUBLIC Telegram channels/groups/users by name or keyword — the way to FIND channels and "
+                   "people to work (e.g. find channels about a topic, then read/join them). Returns type/id/username/title.",
+    "parameters": {"type": "object", "properties": {
+        "account_id": {"type": "integer"}, "query": {"type": "string"},
+        "limit": {"type": "integer", "description": "max results (default 20, cap 50)"}},
+        "required": ["account_id", "query"]},
+}
+_S_DIALOGS = {
+    "name": "tg_dialogs",
+    "description": "List the chats/channels/DMs an account is already in (its dialog list), newest first, with unread counts.",
+    "parameters": {"type": "object", "properties": {
+        "account_id": {"type": "integer"}, "limit": {"type": "integer"}},
+        "required": ["account_id"]},
+}
+_S_READ = {
+    "name": "tg_read",
+    "description": "Read recent messages from ANY channel/group/user (read-only). Use to scan a channel's feed or a "
+                   "chat's discussion. peer = @username, t.me link, or id.",
+    "parameters": {"type": "object", "properties": {
+        "account_id": {"type": "integer"}, "peer": {"type": "string"},
+        "limit": {"type": "integer", "description": "messages to read (default 30, cap 100)"}},
+        "required": ["account_id", "peer"]},
+}
+_S_PARTICIPANTS = {
+    "name": "tg_participants",
+    "description": "List members of a group/channel — the raw material for FINDING CLIENTS (who to reach). Optional "
+                   "search filter. Returns id/username/name. Respect limits and Telegram rules.",
+    "parameters": {"type": "object", "properties": {
+        "account_id": {"type": "integer"}, "peer": {"type": "string"},
+        "limit": {"type": "integer", "description": "members to pull (default 100, cap 500)"},
+        "search": {"type": "string", "description": "optional name filter"}},
+        "required": ["account_id", "peer"]},
+}
+_S_JOIN = {
+    "name": "tg_join",
+    "description": "Join a public channel/group from an account so it can read/act there. peer = @username or link.",
+    "parameters": {"type": "object", "properties": {
+        "account_id": {"type": "integer"}, "peer": {"type": "string"}},
+        "required": ["account_id", "peer"]},
+}
+
 _TOOLS = (
     ("tg_account_qr_start",   _S_QR_START,    _h_qr_start,     True,  "📲"),
+    ("tg_search",         _S_SEARCH,        _h_search,        True,  "🔎"),
+    ("tg_dialogs",        _S_DIALOGS,       _h_dialogs,       True,  "🗂"),
+    ("tg_read",           _S_READ,          _h_read,          True,  "📖"),
+    ("tg_participants",   _S_PARTICIPANTS,  _h_participants,  True,  "👥"),
+    ("tg_join",           _S_JOIN,          _h_join,          True,  "➕"),
     ("tg_account_qr_confirm", _S_QR_CONFIRM,  _h_qr_confirm,   True,  "✅"),
     ("tg_account_add",   _S_ACCOUNT_ADD,   _h_account_add,   True,  "➕"),
     ("tg_account_list",  _S_ACCOUNT_LIST,  _h_account_list,  False, "📇"),
