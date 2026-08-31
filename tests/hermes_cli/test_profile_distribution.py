@@ -932,3 +932,25 @@ class TestInstallProvisioning:
         # idempotent: same version skips
         plan2 = install_distribution(str(src), name="prov", force=True)
         assert any("skip" in line for line in plan2.programs_report)
+
+    def test_failed_program_step_does_not_write_marker(self, profile_env, monkeypatch, tmp_path):
+        # A failing program step (e.g. pip blocked by NetworkPolicy) must NOT latch
+        # a success marker — otherwise the missing package is never retried and the
+        # agent runs permanently broken (the "telethon marker present but absent" bug).
+        monkeypatch.setenv("HERMES_PROFILE_WITH_PROGRAMS", "1")
+        staged = tmp_path / "failsrc"
+        staged.mkdir(parents=True, exist_ok=True)
+        (staged / "SOUL.md").write_text("soul\n")
+        (staged / MANIFEST_FILENAME).write_text(
+            "name: prov\n"
+            "version: 1.0.0\n"
+            "programs:\n"
+            '  run: "exit 3"\n'   # deterministic failure
+        )
+        plan = install_distribution(str(staged), name="prov")
+        tgt = plan.target_dir
+        assert not list(tgt.glob(".programs-installed@*")), "no marker on failed install"
+        assert any("INCOMPLETE" in line for line in plan.programs_report)
+        # a later run RETRIES (marker still absent ⇒ not skipped)
+        plan2 = install_distribution(str(staged), name="prov", force=True)
+        assert not any("skip" in line for line in plan2.programs_report)

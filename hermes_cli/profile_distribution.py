@@ -883,9 +883,9 @@ def _install_programs(
     in system dirs (/usr, /usr/local); in the cloud pod ``entrypoint.sh``
     overlay-mounts those onto the DATA PVC so they persist across restarts — this
     function assumes that persistence and does not provide it. The marker is
-    written AFTER the attempt (a crash mid-install retries next run) and lives at
-    the profile ROOT — never part of the staged git payload, so
-    ``_copy_dist_payload`` never overwrites it.
+    written ONLY when every step succeeded (a partial/failed install stays
+    unmarked and retries next run) and lives at the profile ROOT — never part of
+    the staged git payload, so ``_copy_dist_payload`` never overwrites it.
     """
     programs = manifest.programs
     if programs is None or programs.is_empty():
@@ -895,33 +895,50 @@ def _install_programs(
         return [f"programs skip (v{manifest.version} already installed)"]
 
     report: List[str] = []
+    all_ok = True
     if programs.apt:
-        _run_best_effort(["apt-get", "update"])
+        if not _run_best_effort(["apt-get", "update"]):
+            all_ok = False
         for pkg in programs.apt:
             ok = _run_best_effort(
                 ["apt-get", "install", "-y", "--no-install-recommends", pkg]
             )
+            all_ok = all_ok and ok
             report.append(f"apt {'ok' if ok else 'FAIL'} {pkg}")
     for dep in programs.pip:
         ok = _run_best_effort(["python3", "-m", "pip", "install", "--no-input", dep])
+        all_ok = all_ok and ok
         report.append(f"pip {'ok' if ok else 'FAIL'} {dep}")
     for mod in programs.npm:
         ok = _run_best_effort(["npm", "install", "-g", mod])
+        all_ok = all_ok and ok
         report.append(f"npm {'ok' if ok else 'FAIL'} {mod}")
     if programs.run:
         # cwd = profile ROOT — the same coordinate system boilerplate `into:`
         # uses, so an author writes `cd workspace/studio && …` (not a bare
         # `cd studio`). Predictable and matches where seeded scaffolding lands.
         ok = _run_best_effort(programs.run, cwd=target, shell=True)
+        all_ok = all_ok and ok
         report.append(f"run {'ok' if ok else 'FAIL'}")
 
-    try:
-        marker.write_text(
-            datetime.now(timezone.utc).isoformat(timespec="seconds") + "\n",
-            encoding="utf-8",
+    # 🔴 Write the "installed" marker ONLY when EVERY step succeeded. A partial or
+    # failed install (e.g. pip blocked by a NetworkPolicy blip on boot) must NOT
+    # latch as done — otherwise `marker.exists()` skips the retry forever and the
+    # agent runs permanently missing the package (the "telethon marker present but
+    # telethon absent" bug). On any failure we leave the marker absent so the next
+    # run retries; the report still lists exactly what failed.
+    if all_ok:
+        try:
+            marker.write_text(
+                datetime.now(timezone.utc).isoformat(timespec="seconds") + "\n",
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+    else:
+        report.append(
+            "programs INCOMPLETE — success marker NOT written (retries on next run)"
         )
-    except Exception:
-        pass
     return report
 
 
