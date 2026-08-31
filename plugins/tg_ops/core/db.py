@@ -49,6 +49,23 @@ def now() -> datetime:
     return datetime.utcnow()
 
 
+# --- Telegram app credentials (env-driven, easily swappable) ------------------
+# app_id/app_hash identify the CLIENT APP (my.telegram.org), NOT the account — one
+# throwaway app pair serves the whole fleet. Baked as image env (TG_API_ID/TG_API_HASH)
+# so agents never ask the user for them; overridable per-agent via CP env. Falls back
+# to Telegram Desktop's public app (2040) if unset.
+def default_app_id() -> int:
+    raw = os.environ.get("TG_API_ID")
+    try:
+        return int(raw) if raw else 2040
+    except ValueError:
+        return 2040
+
+
+def default_app_hash() -> str:
+    return os.environ.get("TG_API_HASH") or "b18441a1ff607e10a989891a5462e627"
+
+
 # --- enums -------------------------------------------------------------------
 class AccountSource(str, Enum):
     own = "own"          # user's own account, connected via QR — already "warm"
@@ -98,8 +115,8 @@ class Account(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     # identity — IMMUTABLE once set. session is a native Telethon StringSession.
     session: str
-    app_id: int = 2040
-    app_hash: str = "b18441a1ff607e10a989891a5462e627"
+    app_id: int = Field(default_factory=default_app_id)      # from TG_API_ID env
+    app_hash: str = Field(default_factory=default_app_hash)  # from TG_API_HASH env
     device: Optional[str] = None         # JSON desktop fingerprint (coherent w/ app 2040)
     dc_id: Optional[int] = None
     tg_id: Optional[int] = None

@@ -25,6 +25,7 @@ from telethon import TelegramClient, errors
 from telethon.sessions import StringSession
 
 from . import tgclient, accounts
+from .db import default_app_id, default_app_hash
 
 _pending: dict[str, dict] = {}
 _PENDING_TTL = 600  # seconds a pending QR client is kept before GC
@@ -55,13 +56,13 @@ def _render_png(url: str, token: str) -> Optional[str]:
 
 
 async def qr_start(proxy: Optional[str] = None, country: Optional[str] = None,
-                   app_id: int = 2040, app_hash: Optional[str] = None) -> dict:
+                   app_id: Optional[int] = None, app_hash: Optional[str] = None) -> dict:
     """Begin a QR login. Returns {ok, token, qr_url, qr_png?, hint}."""
     proxy_tuple = None
     if proxy:
         proxy_tuple = tgclient.parse_proxy(accounts._parse_proxy(proxy, country))
-    client = TelegramClient(StringSession(), int(app_id or 2040),
-                            app_hash or accounts._DEFAULT_APP_HASH, proxy=proxy_tuple)
+    client = TelegramClient(StringSession(), int(app_id or default_app_id()),
+                            app_hash or default_app_hash(), proxy=proxy_tuple)
     await client.connect()
     qr = await client.qr_login()
     token = secrets.token_urlsafe(9)

@@ -16,11 +16,9 @@ from sqlmodel import select
 
 from .db import (
     Account, AccountSource, AccountStatus, WarmupPhase, Proxy,
-    get_session, now, log_action,
+    default_app_id, default_app_hash, get_session, now, log_action,
 )
 from . import pool, tgclient
-
-_DEFAULT_APP_HASH = "b18441a1ff607e10a989891a5462e627"
 
 
 def _parse_proxy(proxy: str, country: Optional[str]) -> Proxy:
@@ -53,7 +51,7 @@ def _parse_proxy(proxy: str, country: Optional[str]) -> Proxy:
 
 
 async def add_account(session_str: str, *, source: str = "bought", proxy: Optional[str] = None,
-                      country: Optional[str] = None, app_id: int = 2040, app_hash: Optional[str] = None,
+                      country: Optional[str] = None, app_id: Optional[int] = None, app_hash: Optional[str] = None,
                       purpose: Optional[str] = None, group: Optional[str] = None,
                       device: Optional[str] = None) -> dict:
     """Register + verify an account. Returns {ok, account_id, source, me?, error?}."""
@@ -69,7 +67,7 @@ async def add_account(session_str: str, *, source: str = "bought", proxy: Option
                 s.refresh(p)
                 proxy_id = p.id
             acc = Account(
-                session=session_str, app_id=app_id or 2040, app_hash=app_hash or _DEFAULT_APP_HASH,
+                session=session_str, app_id=app_id or default_app_id(), app_hash=app_hash or default_app_hash(),
                 device=device, country=country, proxy_id=proxy_id, source=src,
                 purpose=purpose, group_name=group,
                 warmup_phase=WarmupPhase.ready if src == AccountSource.own else WarmupPhase.cold,
