@@ -155,6 +155,17 @@ async def _h_join(args: dict, **_kw) -> str:
         return tool_error(str(e))
 
 
+async def _h_create_bot(args: dict, **_kw) -> str:
+    from .core import ops
+    try:
+        if not args.get("name") or not args.get("username"):
+            return tool_error("name and username required")
+        return tool_result(await ops.create_bot(
+            int(args["account_id"]), args["name"], args["username"]))
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
 # --- schemas -----------------------------------------------------------------
 _S_ACCOUNT_ADD = {
     "name": "tg_account_add",
@@ -300,8 +311,21 @@ _S_JOIN = {
         "required": ["account_id", "peer"]},
 }
 
+_S_CREATE_BOT = {
+    "name": "tg_create_bot",
+    "description": "Create a Telegram BOT by talking to @BotFather from an account — scripts /newbot → name → "
+                   "username and returns the bot TOKEN. Use when the user wants a new bot made. username auto-suffixed "
+                   "with 'bot' if missing; if taken, returns a note to try another.",
+    "parameters": {"type": "object", "properties": {
+        "account_id": {"type": "integer", "description": "account that talks to BotFather"},
+        "name": {"type": "string", "description": "display name of the bot"},
+        "username": {"type": "string", "description": "desired @username (must be unique, ends in 'bot')"}},
+        "required": ["account_id", "name", "username"]},
+}
+
 _TOOLS = (
     ("tg_account_qr_start",   _S_QR_START,    _h_qr_start,     True,  "📲"),
+    ("tg_create_bot",     _S_CREATE_BOT,    _h_create_bot,    True,  "🤖"),
     ("tg_search",         _S_SEARCH,        _h_search,        True,  "🔎"),
     ("tg_dialogs",        _S_DIALOGS,       _h_dialogs,       True,  "🗂"),
     ("tg_read",           _S_READ,          _h_read,          True,  "📖"),

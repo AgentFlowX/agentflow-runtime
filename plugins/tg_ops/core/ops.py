@@ -8,6 +8,8 @@ resolves peers the same way as send. Hard account failures raise AccountError.
 """
 from __future__ import annotations
 
+import asyncio
+import re
 from typing import Optional
 
 from telethon.tl import functions
@@ -98,6 +100,45 @@ async def join(account_id: int, peer: str) -> dict:
         entity = await tgclient.resolve(client, peer)
         await client(functions.channels.JoinChannelRequest(entity))
         return {"joined": getattr(entity, "username", None) or getattr(entity, "id", None)}
+    except tgclient.AccountError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise tgclient._classify(e)
+
+
+_TOKEN_RE = re.compile(r"(\d{8,10}:[A-Za-z0-9_-]{35})")
+
+
+async def _bf_exchange(client, bf: str, text: str, timeout: int = 30) -> str:
+    """Send one line to @BotFather and return its NEXT reply text (polls up to timeout)."""
+    before = await client.get_messages(bf, limit=1)
+    before_id = before[0].id if before else 0
+    await tgclient.send_message(client, bf, text)
+    for _ in range(max(5, timeout)):
+        await asyncio.sleep(1)
+        msgs = await client.get_messages(bf, limit=4)
+        newer = [m for m in msgs if getattr(m, "id", 0) > before_id
+                 and not getattr(m, "out", False) and getattr(m, "message", None)]
+        if newer:
+            newer.sort(key=lambda m: m.id)
+            return newer[-1].message
+    return ""
+
+
+async def create_bot(account_id: int, name: str, username: str) -> dict:
+    """Create a Telegram bot by scripting the @BotFather conversation from an account.
+    Returns {ok, username, token} on success, or {ok:false, note} (e.g. username taken)."""
+    client = await pool.get(account_id)
+    try:
+        uname = username if username.lower().endswith("bot") else f"{username}bot"
+        await _bf_exchange(client, "BotFather", "/newbot")        # → "choose a name"
+        await _bf_exchange(client, "BotFather", name)             # → "choose a username"
+        reply = await _bf_exchange(client, "BotFather", uname)    # → token or error
+        m = _TOKEN_RE.search(reply or "")
+        if m:
+            return {"ok": True, "username": uname, "token": m.group(1)}
+        return {"ok": False, "username": uname,
+                "note": (reply or "no token — username may be taken; try another")[:300]}
     except tgclient.AccountError:
         raise
     except Exception as e:  # noqa: BLE001

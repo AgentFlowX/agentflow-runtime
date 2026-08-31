@@ -30,3 +30,4 @@ provides_tools:
   - tg_read
   - tg_participants
   - tg_join
+  - tg_create_bot
