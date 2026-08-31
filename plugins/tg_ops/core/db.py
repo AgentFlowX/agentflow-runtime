@@ -142,6 +142,11 @@ class Account(SQLModel, table=True):
     warmup_phase: WarmupPhase = WarmupPhase.cold   # add-primitive sets `ready` for own
     warmup_actions: int = 0
     warmup_requested: bool = False       # opt-in: only set before a mailing (bought)
+    # autopilot — the daemon auto-maintains this account's auto_reply dialogs
+    autopilot: bool = False
+    persona: Optional[str] = None        # system prompt / role for auto-replies
+    goal: Optional[str] = None           # goal of this worker's dialogs
+    auto_mode: str = "inbound"           # inbound (answer everyone) | outreach (only seeded)
     cooldown_until: Optional[datetime] = None
     deactivated_reason: Optional[str] = None
     last_send_at: Optional[datetime] = None
@@ -175,6 +180,18 @@ class Message(SQLModel, table=True):
     text: str
     tg_msg_id: Optional[int] = None      # the Telegram message id (dedupe inbound)
     created_at: datetime = Field(default_factory=now)
+
+
+class SavedTool(SQLModel, table=True):
+    """An agent-AUTHORED tool (recipe): a named async Python body the agent wrote from
+    the primitives, saved on the PVC and reusable via tg_tool_run. The template layer:
+    a curated set of these = a shippable toolset the agent grows itself."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True)
+    description: Optional[str] = None
+    code: str                            # async body receiving (client, args)
+    created_at: datetime = Field(default_factory=now)
+    updated_at: datetime = Field(default_factory=now)
 
 
 class ActionLog(SQLModel, table=True):

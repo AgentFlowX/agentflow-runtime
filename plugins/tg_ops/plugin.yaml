@@ -23,6 +23,7 @@ provides_tools:
   - tg_account_add
   - tg_account_list
   - tg_send
+  - tg_send_media
   - tg_poll
   - tg_conversations
   - tg_search
@@ -31,3 +32,13 @@ provides_tools:
   - tg_participants
   - tg_join
   - tg_create_bot
+  - tg_exec
+  - tg_tool_define
+  - tg_tool_run
+  - tg_tool_list
+  - tg_tool_delete
+  - tg_autopilot_set
+  - tg_autopilot_start
+  - tg_autopilot_stop
+  - tg_autopilot_status
+  - tg_conversation_auto

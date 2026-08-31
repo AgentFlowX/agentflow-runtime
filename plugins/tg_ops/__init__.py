@@ -166,6 +166,114 @@ async def _h_create_bot(args: dict, **_kw) -> str:
         return tool_error(str(e))
 
 
+async def _h_send_media(args: dict, **_kw) -> str:
+    from .core import messaging
+    try:
+        if not args.get("file"):
+            return tool_error("file (local path or URL) required")
+        r = await messaging.send_media(
+            int(args["account_id"]), args["peer"], args["file"],
+            caption=args.get("caption", ""), conversation_id=args.get("conversation_id"),
+            voice=bool(args.get("voice", False)), video_note=bool(args.get("video_note", False)))
+        return tool_result(r)
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
+async def _h_exec(args: dict, **_kw) -> str:
+    from .core import ops
+    try:
+        if not args.get("code"):
+            return tool_error("code required (async body receiving `client`)")
+        return tool_result(await ops.exec_code(
+            int(args["account_id"]), args["code"], timeout=int(args.get("timeout", 60))))
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
+# --- agent-authored tool registry --------------------------------------------
+def _h_tool_define(args: dict, **_kw) -> str:
+    from .core import usertools
+    try:
+        if not args.get("name") or not args.get("code"):
+            return tool_error("name and code required")
+        return tool_result(usertools.define(args["name"], args["code"], args.get("description", "")))
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
+def _h_tool_list(args: dict, **_kw) -> str:
+    from .core import usertools
+    try:
+        return tool_result({"tools": usertools.list_tools()})
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
+def _h_tool_delete(args: dict, **_kw) -> str:
+    from .core import usertools
+    try:
+        return tool_result(usertools.delete(args.get("name", "")))
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
+async def _h_tool_run(args: dict, **_kw) -> str:
+    from .core import usertools
+    try:
+        if not args.get("name"):
+            return tool_error("name required")
+        return tool_result(await usertools.run(
+            args["name"], int(args["account_id"]), args.get("args") or {},
+            timeout=int(args.get("timeout", 90))))
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
+# --- autopilot control -------------------------------------------------------
+def _h_autopilot_set(args: dict, **_kw) -> str:
+    from .core import autopilot
+    try:
+        return tool_result(autopilot.configure_account(
+            int(args["account_id"]), persona=args.get("persona"), goal=args.get("goal"),
+            mode=args.get("mode"), on=bool(args.get("on", True))))
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
+def _h_autopilot_start(args: dict, **_kw) -> str:
+    from .core import autopilot
+    try:
+        return tool_result(autopilot.start())
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
+def _h_autopilot_stop(args: dict, **_kw) -> str:
+    from .core import autopilot
+    try:
+        return tool_result(autopilot.stop())
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
+def _h_autopilot_status(args: dict, **_kw) -> str:
+    from .core import autopilot
+    try:
+        return tool_result(autopilot.status())
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
+def _h_conversation_auto(args: dict, **_kw) -> str:
+    from .core import autopilot
+    try:
+        return tool_result(autopilot.set_conversation_auto(
+            int(args["conversation_id"]), bool(args.get("on", False))))
+    except Exception as e:  # noqa: BLE001
+        return tool_error(str(e))
+
+
 # --- schemas -----------------------------------------------------------------
 _S_ACCOUNT_ADD = {
     "name": "tg_account_add",
@@ -323,9 +431,89 @@ _S_CREATE_BOT = {
         "required": ["account_id", "name", "username"]},
 }
 
+_S_SEND_MEDIA = {
+    "name": "tg_send_media",
+    "description": "Send a photo/video/gif/document/voice from a local path (or URL) with an optional caption. "
+                   "Use for any media message. voice=true for a voice note, video_note=true for a round video.",
+    "parameters": {"type": "object", "properties": {
+        "account_id": {"type": "integer"}, "peer": {"type": "string"},
+        "file": {"type": "string", "description": "local file path or URL"},
+        "caption": {"type": "string"}, "conversation_id": {"type": "integer"},
+        "voice": {"type": "boolean"}, "video_note": {"type": "boolean"}},
+        "required": ["account_id", "peer", "file"]},
+}
+_S_EXEC = {
+    "name": "tg_exec",
+    "description": "ESCAPE HATCH — run an async Python snippet with the connected Telethon `client` (+ `functions`, "
+                   "`types`, `tgclient`) in scope and return its value. Do ANYTHING Telegram's API supports without a "
+                   "dedicated tool: delete/edit/pin/forward messages, create channels/groups, invite, react, stats, raw "
+                   "MTProto. `code` is the async function BODY receiving `client`; `return` a value to get it back. "
+                   "Runs on the user's OWN account — powerful; prefer a named tool when one exists.",
+    "parameters": {"type": "object", "properties": {
+        "account_id": {"type": "integer"},
+        "code": {"type": "string", "description": "async body, e.g. `msg=await client.send_message('me','hi'); return msg.id`"},
+        "timeout": {"type": "integer"}},
+        "required": ["account_id", "code"]},
+}
+
+_S_TOOL_DEFINE = {
+    "name": "tg_tool_define",
+    "description": "SAVE an agent-authored tool (recipe): a named, reusable async Python body receiving "
+                   "(client, args) that you wrote from the primitives. Persists on the PVC. Prototype with tg_exec "
+                   "first, then crystallize the working code here. `code` example: "
+                   "`res = await client(functions.channels.CreateChannelRequest(title=args['title'], about='', broadcast=True)); return res.chats[0].id`",
+    "parameters": {"type": "object", "properties": {
+        "name": {"type": "string"}, "description": {"type": "string"},
+        "code": {"type": "string", "description": "async body receiving (client, args)"}},
+        "required": ["name", "code"]},
+}
+_S_TOOL_RUN = {
+    "name": "tg_tool_run",
+    "description": "Run a saved agent-authored tool by name on an account, passing args. Returns its result.",
+    "parameters": {"type": "object", "properties": {
+        "name": {"type": "string"}, "account_id": {"type": "integer"},
+        "args": {"type": "object"}, "timeout": {"type": "integer"}},
+        "required": ["name", "account_id"]},
+}
+_S_TOOL_LIST = {"name": "tg_tool_list", "description": "List saved agent-authored tools (name + description).",
+                "parameters": {"type": "object", "properties": {}}}
+_S_TOOL_DELETE = {"name": "tg_tool_delete", "description": "Delete a saved agent-authored tool by name.",
+                  "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}
+
+_S_AP_SET = {
+    "name": "tg_autopilot_set",
+    "description": "Configure an account as an autopilot WORKER: persona (who it is / how it talks), goal, mode "
+                   "(inbound=answer everyone who writes | outreach=only dialogs it started), on=true to enable. In "
+                   "inbound mode its open dialogs are flipped to auto so the daemon maintains them.",
+    "parameters": {"type": "object", "properties": {
+        "account_id": {"type": "integer"}, "persona": {"type": "string"}, "goal": {"type": "string"},
+        "mode": {"type": "string", "enum": ["inbound", "outreach"]}, "on": {"type": "boolean"}},
+        "required": ["account_id"]},
+}
+_S_AP_START = {"name": "tg_autopilot_start", "description": "Start the autopilot daemon — it maintains all autopilot accounts' auto dialogs 24/7 (poll → LLM reply → send, paced). Idempotent.", "parameters": {"type": "object", "properties": {}}}
+_S_AP_STOP = {"name": "tg_autopilot_stop", "description": "Stop the autopilot daemon.", "parameters": {"type": "object", "properties": {}}}
+_S_AP_STATUS = {"name": "tg_autopilot_status", "description": "Autopilot daemon status: running, how many accounts on autopilot, replies sent, errors.", "parameters": {"type": "object", "properties": {}}}
+_S_CONV_AUTO = {
+    "name": "tg_conversation_auto",
+    "description": "Take a specific dialog OFF autopilot (human/agent takeover, on=false) or hand it back to the daemon (on=true).",
+    "parameters": {"type": "object", "properties": {
+        "conversation_id": {"type": "integer"}, "on": {"type": "boolean"}}, "required": ["conversation_id"]},
+}
+
 _TOOLS = (
     ("tg_account_qr_start",   _S_QR_START,    _h_qr_start,     True,  "📲"),
     ("tg_create_bot",     _S_CREATE_BOT,    _h_create_bot,    True,  "🤖"),
+    ("tg_send_media",     _S_SEND_MEDIA,    _h_send_media,    True,  "🎬"),
+    ("tg_exec",           _S_EXEC,          _h_exec,          True,  "🧩"),
+    ("tg_tool_define",    _S_TOOL_DEFINE,   _h_tool_define,   False, "🛠"),
+    ("tg_tool_run",       _S_TOOL_RUN,      _h_tool_run,      True,  "▶️"),
+    ("tg_tool_list",      _S_TOOL_LIST,     _h_tool_list,     False, "📋"),
+    ("tg_tool_delete",    _S_TOOL_DELETE,   _h_tool_delete,   False, "🗑"),
+    ("tg_autopilot_set",  _S_AP_SET,        _h_autopilot_set, False, "🎛"),
+    ("tg_autopilot_start", _S_AP_START,     _h_autopilot_start, False, "🟢"),
+    ("tg_autopilot_stop", _S_AP_STOP,       _h_autopilot_stop, False, "🔴"),
+    ("tg_autopilot_status", _S_AP_STATUS,   _h_autopilot_status, False, "📊"),
+    ("tg_conversation_auto", _S_CONV_AUTO,  _h_conversation_auto, False, "✋"),
     ("tg_search",         _S_SEARCH,        _h_search,        True,  "🔎"),
     ("tg_dialogs",        _S_DIALOGS,       _h_dialogs,       True,  "🗂"),
     ("tg_read",           _S_READ,          _h_read,          True,  "📖"),

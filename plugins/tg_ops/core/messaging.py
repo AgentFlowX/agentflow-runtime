@@ -89,6 +89,43 @@ async def send(account_id: int, peer_ref: str, text: str, *, conversation_id: Op
     return {"ok": True, "conversation_id": conv_id, "tg_msg_id": tg_msg_id, "peer_tg_id": peer_tg_id}
 
 
+async def send_media(account_id: int, peer: str, file: str, caption: str = "", *,
+                     conversation_id: Optional[int] = None, voice: bool = False,
+                     video_note: bool = False) -> dict:
+    """Send a photo/video/gif/document/voice from a local path (or URL) to a peer,
+    with an optional caption. Records it on the Conversation like a text message."""
+    client = await pool.get(account_id)
+    try:
+        entity = await tgclient.resolve(client, peer)
+        sent = await client.send_file(entity, file, caption=(caption or None),
+                                      voice_note=voice, video_note=video_note)
+    except tgclient.AccountError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise tgclient._classify(e)
+    tg_msg_id = getattr(sent, "id", None)
+
+    def _persist():
+        with get_session() as s:
+            conv = _get_or_create_conversation(s, account_id, entity, peer, conversation_id)
+            conv.last_out_id = tg_msg_id or conv.last_out_id
+            conv.last_message_at = now()
+            conv.status = ConversationStatus.open
+            s.add(Message(conversation_id=conv.id, sender=MessageFrom.account,
+                          text=(caption or "[media]"), tg_msg_id=tg_msg_id))
+            acc = s.get(Account, account_id)
+            if acc is not None:
+                acc.last_send_at = now()
+                s.add(acc)
+            s.add(conv)
+            s.commit()
+            return conv.id
+
+    conv_id = await asyncio.to_thread(_persist)
+    log_action(account_id, "send_media", f"conv={conv_id}", ok=True)
+    return {"ok": True, "conversation_id": conv_id, "tg_msg_id": tg_msg_id}
+
+
 def _select_conversations(account_id, conversation_id) -> list[Conversation]:
     with get_session() as s:
         q = select(Conversation).where(Conversation.status == ConversationStatus.open)
