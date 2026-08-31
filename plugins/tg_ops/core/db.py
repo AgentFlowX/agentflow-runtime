@@ -26,9 +26,11 @@ from typing import Optional
 
 from sqlmodel import SQLModel, Field, create_engine, Session
 
-# Data path is on the PVC; the engine CODE is baked in the image. Env set by the
-# pod entrypoint (TGENGINE_DB), default beside TGENGINE_HOME for local runs/tests.
-DB_PATH = os.environ.get("TGENGINE_DB", os.path.join(os.environ.get("TGENGINE_HOME", "."), "tgengine.db"))
+# Data path is on the PVC; the engine CODE is baked in the image. tg_ops uses its
+# OWN db env (TGOPS_DB) — deliberately NOT the legacy distribution engine's
+# TGENGINE_DB — so the two never share a SQLite file and collide on the account/proxy
+# table schemas. Defaults beside HERMES_HOME (the PVC) for the pod, cwd for tests.
+DB_PATH = os.environ.get("TGOPS_DB") or os.path.join(os.environ.get("HERMES_HOME", "."), "tgops.db")
 _engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
 
 

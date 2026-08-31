@@ -45,7 +45,7 @@ def _render_png(url: str, token: str) -> Optional[str]:
     """Best-effort QR PNG into the outbox so the agent can just send the file."""
     try:
         import qrcode  # optional dep
-        outdir = os.environ.get("TGENGINE_OUTBOX", "/app/outbox")
+        outdir = os.environ.get("TGOPS_OUTBOX", "/app/outbox")
         os.makedirs(outdir, exist_ok=True)
         path = os.path.join(outdir, f"tg_qr_{token}.png")
         qrcode.make(url).save(path)
