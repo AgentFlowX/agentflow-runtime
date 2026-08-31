@@ -22,7 +22,7 @@ from .db import (
     Account, Conversation, ConversationStatus, Message, MessageFrom,
     get_session, now, log_action,
 )
-from . import pool, tgclient
+from . import pool, tgclient, humanize
 
 
 # --- helpers -----------------------------------------------------------------
@@ -61,12 +61,20 @@ def _get_or_create_conversation(s, account_id, entity, peer_ref, conversation_id
 
 
 # --- primitives --------------------------------------------------------------
-async def send(account_id: int, peer_ref: str, text: str, *, conversation_id: Optional[int] = None) -> dict:
+async def send(account_id: int, peer_ref: str, text: str, *, conversation_id: Optional[int] = None,
+               instant: bool = False) -> dict:
     """Send `text` to a peer from an account; upsert the Conversation + store the
-    outbound Message. Returns {ok, conversation_id, tg_msg_id, peer_tg_id}."""
+    outbound Message. Shows a human 'typing…' indicator + realistic delay first
+    (instant=true skips it). Returns {ok, conversation_id, tg_msg_id, peer_tg_id}."""
     client = await pool.get(account_id)
     entity = await tgclient.resolve(client, peer_ref)          # raises AccountError
-    tg_msg_id = await tgclient.send_message(client, entity, text)
+    try:
+        sent = await humanize.type_and_send(client, entity, text, instant=instant)
+    except tgclient.AccountError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise tgclient._classify(e)
+    tg_msg_id = getattr(sent, "id", None)
 
     def _persist():
         with get_session() as s:
@@ -91,14 +99,15 @@ async def send(account_id: int, peer_ref: str, text: str, *, conversation_id: Op
 
 async def send_media(account_id: int, peer: str, file: str, caption: str = "", *,
                      conversation_id: Optional[int] = None, voice: bool = False,
-                     video_note: bool = False) -> dict:
+                     video_note: bool = False, instant: bool = False) -> dict:
     """Send a photo/video/gif/document/voice from a local path (or URL) to a peer,
-    with an optional caption. Records it on the Conversation like a text message."""
+    with an optional caption. Shows the right 'recording voice / uploading video'
+    indicator first. Records it on the Conversation like a text message."""
     client = await pool.get(account_id)
     try:
         entity = await tgclient.resolve(client, peer)
-        sent = await client.send_file(entity, file, caption=(caption or None),
-                                      voice_note=voice, video_note=video_note)
+        sent = await humanize.record_and_send_file(client, entity, file, caption=caption,
+                                                   voice=voice, video_note=video_note, instant=instant)
     except tgclient.AccountError:
         raise
     except Exception as e:  # noqa: BLE001

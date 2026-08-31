@@ -89,7 +89,8 @@ async def _h_send(args: dict, **_kw) -> str:
     from .core import messaging
     try:
         r = await messaging.send(int(args["account_id"]), args["peer"], args["text"],
-                                 conversation_id=args.get("conversation_id"))
+                                 conversation_id=args.get("conversation_id"),
+                                 instant=bool(args.get("instant", False)))
         return tool_result(r)
     except Exception as e:  # noqa: BLE001
         return tool_error(str(e))
@@ -184,7 +185,8 @@ async def _h_send_media(args: dict, **_kw) -> str:
         r = await messaging.send_media(
             int(args["account_id"]), args["peer"], args["file"],
             caption=args.get("caption", ""), conversation_id=args.get("conversation_id"),
-            voice=bool(args.get("voice", False)), video_note=bool(args.get("video_note", False)))
+            voice=bool(args.get("voice", False)), video_note=bool(args.get("video_note", False)),
+            instant=bool(args.get("instant", False)))
         return tool_result(r)
     except Exception as e:  # noqa: BLE001
         return tool_error(str(e))

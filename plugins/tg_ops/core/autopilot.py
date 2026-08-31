@@ -24,7 +24,7 @@ from .db import (
     Account, Proxy, Conversation, ConversationStatus, Message, MessageFrom,
     get_session, now,
 )
-from . import tgclient, ai
+from . import tgclient, ai, humanize
 
 TICK = int(os.environ.get("TGOPS_AUTOPILOT_TICK", "20") or "20")
 DELAY_MIN = int(os.environ.get("TGOPS_AUTOPILOT_DELAY_MIN", "8") or "8")
@@ -111,8 +111,29 @@ async def _client_for(acc: Account):
     return c
 
 
+async def _reply_if_pending(client, acc: Account, conv: Conversation, peer) -> bool:
+    """Reply to the last stored inbound message, if it has no stored reply yet."""
+    history = await asyncio.to_thread(_history, conv.id, 30)
+    if not history or history[-1]["sender"] != "user":
+        return False
+    reply = await asyncio.to_thread(ai.generate_reply, acc.persona or "", history)
+    if not reply:
+        return False
+    incoming = history[-1].get("text") if history else None
+    sent = await humanize.type_and_send(client, peer, reply, incoming=incoming)
+    await asyncio.to_thread(_store_outbound, conv.id, acc.id, reply, getattr(sent, "id", None))
+    _stats["replies"] += 1
+    await asyncio.sleep(random.randint(DELAY_MIN, DELAY_MAX))
+    return True
+
+
 async def _handle_conv(client, acc: Account, conv: Conversation) -> None:
     peer = conv.peer_username or conv.peer_ref or conv.peer_tg_id
+    # tg_poll can ingest an inbound message before this daemon sees it. In that
+    # case last_in_id is already advanced, so fetching by min_id returns nothing.
+    # Always drain the locally stored unanswered message first.
+    if await _reply_if_pending(client, acc, conv, peer):
+        return
     batch = await client.get_messages(peer, min_id=conv.last_in_id, limit=30)
     if not batch:
         return
@@ -122,16 +143,7 @@ async def _handle_conv(client, acc: Account, conv: Conversation) -> None:
         return
     inbound.reverse()
     await asyncio.to_thread(_store_inbound, conv.id, inbound, max_id)
-    history = await asyncio.to_thread(_history, conv.id, 30)
-    if not history or history[-1]["sender"] != "user":
-        return
-    reply = await asyncio.to_thread(ai.generate_reply, acc.persona or "", history)
-    if not reply:
-        return
-    sent = await client.send_message(peer, reply)
-    await asyncio.to_thread(_store_outbound, conv.id, acc.id, reply, getattr(sent, "id", None))
-    _stats["replies"] += 1
-    await asyncio.sleep(random.randint(DELAY_MIN, DELAY_MAX))
+    await _reply_if_pending(client, acc, conv, peer)
 
 
 async def _tick() -> None:

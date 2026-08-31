@@ -26,6 +26,7 @@ from . import tgclient
 MAX_CLIENTS = int(os.environ.get("TGENGINE_POOL_MAX", "20") or "20")
 
 _clients: dict[int, TelegramClient] = {}
+_client_loops: dict[int, asyncio.AbstractEventLoop] = {}
 _last_used: dict[int, float] = {}
 _locks: dict[int, asyncio.Lock] = {}
 _pool_lock = asyncio.Lock()
@@ -55,17 +56,29 @@ async def get(account_id: int) -> TelegramClient:
     lock = await _lock_for(account_id)
     async with lock:
         cached = _clients.get(account_id)
-        if cached is not None and cached.is_connected():
+        # Tool handlers may run on short-lived event loops. A Telethon client is
+        # loop-bound, so never reuse a client created by a different loop.
+        current_loop = asyncio.get_running_loop()
+        cached_loop = _client_loops.get(account_id)
+        if cached is not None and cached_loop is current_loop and cached.is_connected():
             _last_used[account_id] = time.monotonic()
             return cached
-        # stale/missing → drop it and (re)connect fresh
+        # stale/missing → drop it and reconnect on the current loop. Do not await
+        # disconnect across loops: that is precisely what causes Telethon's
+        # 'event loop must not change after connection' error.
         if cached is not None:
-            await tgclient.disconnect(cached)
+            if cached_loop is current_loop:
+                try:
+                    await tgclient.disconnect(cached)
+                except Exception:
+                    pass
             _clients.pop(account_id, None)
+            _last_used.pop(account_id, None)
 
         acc, proxy = await asyncio.to_thread(_load, account_id)
         client = await tgclient.connect(acc, proxy)   # raises AccountError on failure
         _clients[account_id] = client
+        _client_loops[account_id] = current_loop
         _last_used[account_id] = time.monotonic()
 
     await _evict_if_over_cap(keep=account_id)
@@ -85,6 +98,7 @@ async def _evict_if_over_cap(keep: int) -> None:
 async def close(account_id: int) -> None:
     """Disconnect + evict one account's client (best-effort)."""
     client = _clients.pop(account_id, None)
+    _client_loops.pop(account_id, None)
     _last_used.pop(account_id, None)
     if client is not None:
         await tgclient.disconnect(client)
