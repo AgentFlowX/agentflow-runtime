@@ -6672,6 +6672,8 @@ class TelegramAdapter(BasePlatformAdapter):
 
     def _build_model_keyboard(self, models: list, page: int) -> tuple:
         """Build paginated model buttons. Returns (keyboard, page_info_text)."""
+    # Import before pagination: multi-page provider model lists use t() for nav labels.
+        from agent.i18n import t
         page_models, page_meta = self._format_choice_page(
             models, page, self._MODEL_PAGE_SIZE
         )
