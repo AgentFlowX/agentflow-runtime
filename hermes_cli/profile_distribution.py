@@ -88,6 +88,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -1078,7 +1079,11 @@ def _install_programs(
             all_ok = all_ok and ok
             report.append(f"apt {'ok' if ok else 'FAIL'} {pkg}")
     for dep in programs.pip:
-        ok = _run_best_effort(["python3", "-m", "pip", "install", "--no-input", dep])
+        # Install into the interpreter Hermes itself runs on, not whatever
+        # "python3" happens to resolve to. A host image can ship a second,
+        # older Python; installing there puts the package somewhere Hermes and
+        # its plugins can never import from, and the failure is silent.
+        ok = _run_best_effort([sys.executable, "-m", "pip", "install", "--no-input", dep])
         all_ok = all_ok and ok
         report.append(f"pip {'ok' if ok else 'FAIL'} {dep}")
     for mod in programs.npm:
