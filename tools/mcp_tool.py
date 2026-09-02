@@ -208,12 +208,24 @@ def _write_stderr_log_header(server_name: str) -> None:
 
 _MCP_AVAILABLE = False
 _MCP_HTTP_AVAILABLE = False
+
+
+def _mcp_pkg_version():
+    """Installed mcp SDK version, for diagnostics only (never raises)."""
+    try:
+        from importlib.metadata import version
+
+        return version("mcp")
+    except Exception:
+        return "unknown"
+
 _MCP_SAMPLING_TYPES = False
 _MCP_NOTIFICATION_TYPES = False
 _MCP_ELICITATION_TYPES = False
 _MCP_MESSAGE_HANDLER_SUPPORTED = False
 _MCP_LOGGING_CALLBACK_SUPPORTED = False
 _MCP_NEW_HTTP = False
+_MCP_LEGACY_HTTP = False
 sse_client = None
 # Conservative fallback for SDK builds that don't export LATEST_PROTOCOL_VERSION.
 # Streamable HTTP was introduced by 2025-03-26, so this remains valid for the
@@ -277,7 +289,7 @@ def _ensure_mcp_sdk() -> bool:
     global _MCP_SDK_IMPORT_ATTEMPTED, _MCP_AVAILABLE, _MCP_HTTP_AVAILABLE
     global _MCP_SAMPLING_TYPES, _MCP_NOTIFICATION_TYPES, _MCP_ELICITATION_TYPES
     global _MCP_MESSAGE_HANDLER_SUPPORTED, _MCP_LOGGING_CALLBACK_SUPPORTED
-    global _MCP_NEW_HTTP, LATEST_PROTOCOL_VERSION, sse_client
+    global _MCP_NEW_HTTP, _MCP_LEGACY_HTTP, LATEST_PROTOCOL_VERSION, sse_client
     global ClientSession, StdioServerParameters, stdio_client
     global streamablehttp_client, streamable_http_client
     global CreateMessageResult, CreateMessageResultWithTools, ErrorData
@@ -297,18 +309,31 @@ def _ensure_mcp_sdk() -> bool:
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
             _MCP_AVAILABLE = True
-            try:
-                from mcp.client.streamable_http import streamablehttp_client
-                _MCP_HTTP_AVAILABLE = True
-            except ImportError:
-                _MCP_HTTP_AVAILABLE = False
-            # Prefer the non-deprecated API (mcp >= 1.24.0); fall back to the
-            # deprecated wrapper for older SDK versions.
+            # HTTP transport. The SDK renamed the entry point in 1.24.0
+            # (``streamablehttp_client`` → ``streamable_http_client``) and
+            # DROPPED the old name in later releases. Availability must be the
+            # OR of the two: gating it on the legacy name alone made every
+            # remote/OAuth MCP server (Pipedream, hosted tool servers) report
+            # "requires HTTP transport but mcp.client.streamable_http is not
+            # available" on any modern SDK — with the package installed and
+            # importable the whole time.
             try:
                 from mcp.client.streamable_http import streamable_http_client
                 _MCP_NEW_HTTP = True
             except ImportError:
                 _MCP_NEW_HTTP = False
+            try:
+                from mcp.client.streamable_http import streamablehttp_client
+                _MCP_LEGACY_HTTP = True
+            except ImportError:
+                _MCP_LEGACY_HTTP = False
+            _MCP_HTTP_AVAILABLE = _MCP_NEW_HTTP or _MCP_LEGACY_HTTP
+            if not _MCP_HTTP_AVAILABLE:
+                logger.warning(
+                    "mcp.client.streamable_http exposes neither streamable_http_client nor "
+                    "streamablehttp_client — HTTP MCP servers will be unavailable (mcp SDK %s)",
+                    getattr(_mcp_pkg_version(), "__str__", lambda: "unknown")(),
+                )
             try:
                 from mcp.types import LATEST_PROTOCOL_VERSION
             except ImportError:
@@ -3217,9 +3242,14 @@ class MCPServerTask:
             # http_client is provided, so we wrap in async-with.
             try:
                 async with httpx.AsyncClient(**client_kwargs) as http_client:
-                    async with streamable_http_client(url, http_client=http_client) as (
-                        read_stream, write_stream, _get_session_id,
-                    ):
+                    # The SDK's yield shape changed with the rename: the legacy
+                    # streamablehttp_client yielded (read, write, get_session_id),
+                    # the current streamable_http_client yields (read, write).
+                    # Unpacking three from two raised "not enough values to
+                    # unpack", surfacing as a bare connect failure for every
+                    # HTTP MCP server. Accept both shapes.
+                    async with streamable_http_client(url, http_client=http_client) as _streams:
+                        read_stream, write_stream = _streams[0], _streams[1]
                         async with ClientSession(read_stream, write_stream, **sampling_kwargs) as session:
                             # Bound the handshake (#59349) — see stdio path.
                             self.initialize_result = await asyncio.wait_for(
