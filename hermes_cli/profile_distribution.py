@@ -15,7 +15,7 @@ Where this fits relative to the existing pieces:
 Subcommands (all live under ``hermes profile``, not a parallel tree):
 
     hermes profile install <source> [--name N] [--alias] [--force] [--yes]
-    hermes profile update  <name>  [--force-config] [--yes]
+    hermes profile update  <name>  [--force-config] [--force] [--yes]
     hermes profile info    <name>
 
 ``<source>`` is one of:
@@ -64,9 +64,17 @@ Backward-compatible: a manifest that declares neither ``programs`` nor
 Update semantics:
 
 * Distribution-owned paths (SOUL.md, mcp.json, skills/, cron/,
-  distribution.yaml) are replaced from the new source.
-* ``config.yaml`` is distribution-owned but preserved on update unless
-  ``--force-config`` is passed (user overrides typically live here).
+  distribution.yaml) are refreshed from the new source.
+* An update NEVER silently destroys a local edit.  Every install/update
+  records a sha256 of each file it writes in ``.dist-hashes.json`` at the
+  profile root.  On the next update, a distribution-owned file whose content
+  no longer matches that record was edited locally — by the owner or by the
+  agent itself — so the local version stays and the incoming version is
+  written beside it as ``<name>.new``.  Files still matching the record are
+  overwritten as before, which is how template improvements reach agents.
+* ``config.yaml`` is distribution-owned but preserved wholesale on update
+  unless ``--force-config`` is passed (user overrides typically live here).
+* ``--force`` is the escape hatch: overwrite everything, local edits included.
 * User-owned paths (memories/, sessions/, state.db, auth.json, .env,
   logs/, workspace/, home/, plans/, *_cache/, and anything under
   ``local/``) are never touched.
@@ -74,6 +82,8 @@ Update semantics:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -95,6 +105,14 @@ from hermes_cli._subprocess_compat import noninteractive_git_env
 MANIFEST_FILENAME = "distribution.yaml"
 ENV_TEMPLATE_FILENAME = ".env.template"
 ENV_EXAMPLE_FILENAME = ".env.EXAMPLE"
+
+# Record of what the last install/update actually wrote (path -> sha256),
+# so the next update can tell a local edit from an untouched file. Lives at
+# the profile ROOT and is never part of a staged distribution payload.
+DIST_HASHES_FILENAME = ".dist-hashes.json"
+
+# Suffix for the incoming version of a file whose local edit we kept.
+NEW_SUFFIX = ".new"
 
 # Default distribution-owned paths (relative to profile root).  Authors may
 # override via ``distribution_owned:`` in the manifest.  config.yaml is
@@ -645,6 +663,9 @@ class InstallPlan:
     # Populated by install/update after payload copy — one line per install step.
     programs_report: List[str] = field(default_factory=list)
     boilerplate_report: List[str] = field(default_factory=list)
+    # Profile-relative paths whose LOCAL (edited) version was kept instead of
+    # being overwritten; the incoming version sits beside each as <path>.new.
+    preserved_paths: List[str] = field(default_factory=list)
 
 
 def _has_cron_jobs(staged: Path) -> bool:
@@ -725,12 +746,164 @@ def plan_install(
     )
 
 
+# ---------------------------------------------------------------------------
+# Local-edit protection — hash record of what the last install/update wrote
+# ---------------------------------------------------------------------------
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 16), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _read_dist_hashes(target: Path) -> Dict[str, str]:
+    """Load the profile's ``.dist-hashes.json`` record, or {} if absent."""
+    path = target / DIST_HASHES_FILENAME
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        # A corrupt record reads as absent, which lands on the conservative
+        # legacy path in _PayloadWriter (differs-from-incoming == edited).
+        return {}
+    files = data.get("files") if isinstance(data, dict) else None
+    if not isinstance(files, dict):
+        return {}
+    return {str(k): v for k, v in files.items() if isinstance(v, str)}
+
+
+def _write_dist_hashes(target: Path, hashes: Dict[str, str]) -> None:
+    try:
+        from utils import atomic_json_write
+
+        atomic_json_write(
+            target / DIST_HASHES_FILENAME,
+            {"version": 1, "files": dict(sorted(hashes.items()))},
+            mode=0o644,
+        )
+    except Exception:
+        # Never fail an install over bookkeeping. A missing record only costs
+        # precision: the next update falls back to the legacy comparison.
+        pass
+
+
+class _PayloadWriter:
+    """Writes distribution-owned files without clobbering local edits.
+
+    Every install/update records a sha256 of each file it wrote (see
+    :data:`DIST_HASHES_FILENAME`). On the next update a file whose current
+    content no longer matches that record was edited after we wrote it — by
+    the owner or by the agent itself — so the local version is kept and the
+    incoming version is written beside it as ``<name>.new``. A file that still
+    matches is overwritten normally, which is how template improvements reach
+    already-installed agents.
+
+    LEGACY PROFILES (installed before this record existed) have no entry for
+    any path. We must not read "no record" as "unmodified": that would wipe
+    precisely the edits this class exists to protect on the very first update
+    after the upgrade. So a path with no record counts as locally modified
+    whenever it differs from the incoming version — and when it is
+    byte-identical there is nothing to lose either way. The cost of that
+    choice is a false positive: on a legacy profile the first update may hand
+    back a .new for a file nobody touched, because "the owner edited it" and
+    "the template moved on" look identical without a record. That costs one
+    manual copy; the other branch costs the edit itself. Every write seeds the
+    record, so from the next update on the comparison is exact.
+
+    ``force`` disables all of this and restores the old overwrite-everything
+    behaviour (including the wholesale replacement of a directory entry).
+    """
+
+    def __init__(self, target: Path, *, force: bool = False) -> None:
+        self.target = target
+        self.force = force
+        self.recorded: Dict[str, str] = _read_dist_hashes(target)
+        self.hashes: Dict[str, str] = dict(self.recorded)
+        self.preserved: List[str] = []
+
+    def _rel(self, path: Path) -> str:
+        return path.relative_to(self.target).as_posix()
+
+    def write(self, src: Path, dest: Path) -> None:
+        """Copy a staged file, or merge a staged directory tree, into *dest*."""
+        if src.is_dir():
+            self._write_dir(src, dest)
+        else:
+            self.write_file(src, dest)
+
+    def write_file(self, src: Path, dest: Path, *, always: bool = False) -> None:
+        """Copy one staged file to *dest*, keeping a local edit if there is one.
+
+        ``always`` skips the check for files the caller has already decided on
+        (config.yaml under --force-config).
+        """
+        rel = self._rel(dest)
+        incoming = _sha256_file(src)
+        if dest.is_file() and not (always or self.force):
+            current = _sha256_file(dest)
+            recorded = self.recorded.get(rel)
+            edited = current != recorded if recorded is not None else current != incoming
+            if edited and current != incoming:
+                shutil.copy2(src, dest.with_name(dest.name + NEW_SUFFIX))
+                self.preserved.append(rel)
+                # Record the INCOMING hash even though we did not write dest:
+                # if the owner later adopts the .new file, the path lines up
+                # again and future updates flow through normally.
+                self.hashes[rel] = incoming
+                return
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        self.hashes[rel] = incoming
+
+    def _write_dir(self, src_dir: Path, dest_dir: Path) -> None:
+        incoming: set = set()
+        for src in sorted(src_dir.rglob("*")):
+            if not src.is_file():
+                continue
+            dest = dest_dir.joinpath(*src.relative_to(src_dir).parts)
+            self.write_file(src, dest)
+            incoming.add(self._rel(dest))
+        self._prune(dest_dir, incoming)
+
+    def _prune(self, dest_dir: Path, incoming: set) -> None:
+        """Drop files the distribution used to ship and no longer does.
+
+        Only files we can prove are untouched (hash still matches the record)
+        go; anything locally created or locally edited stays. This replaces the
+        old wholesale ``rmtree`` of a directory entry, which deleted an agent's
+        own files inside skills/ along with the stale ones.
+        """
+        if not dest_dir.is_dir():
+            return
+        for existing in sorted(dest_dir.rglob("*")):
+            if not existing.is_file():
+                continue
+            rel = self._rel(existing)
+            if rel in incoming or rel.endswith(NEW_SUFFIX):
+                continue
+            if not self.force:
+                recorded = self.recorded.get(rel)
+                if recorded is None or _sha256_file(existing) != recorded:
+                    continue
+            try:
+                existing.unlink()
+            except OSError:
+                continue
+            self.hashes.pop(rel, None)
+
+
 def _copy_dist_payload(
     staged: Path,
     target: Path,
     manifest: DistributionManifest,
     preserve_config: bool,
-) -> None:
+    *,
+    force: bool = False,
+) -> List[str]:
     """Copy distribution-owned files from *staged* into *target*.
 
     User-owned paths are never touched.  ``config.yaml`` is replaced only when
@@ -743,25 +916,32 @@ def _copy_dist_payload(
     ``skills/research`` or ``cron/digest.json`` are honoured).  When the list
     is omitted the legacy behaviour is preserved: every staged entry outside
     ``USER_OWNED_EXCLUDE`` is copied.
+
+    Files edited locally since the last install/update are KEPT and the
+    incoming version is written as ``<path>.new`` — see :class:`_PayloadWriter`.
+    ``force`` overwrites everything regardless.  Returns the list of
+    profile-relative paths that were preserved this way.
     """
     target.mkdir(parents=True, exist_ok=True)
+    writer = _PayloadWriter(target, force=force)
 
-    def _copy_entry(entry: Path, dest: Path) -> None:
-        if entry.is_dir():
-            if dest.exists():
-                shutil.rmtree(dest)
-            staged_resolved = staged.resolve()
-            shutil.copytree(
-                entry,
-                dest,
-                ignore=lambda d, names: (
-                    [n for n in names if n in USER_OWNED_EXCLUDE]
-                    if Path(d).resolve() == staged_resolved
-                    else []
-                ),
-            )
-        else:
-            shutil.copy2(entry, dest)
+    def _handle_top_level(src: Path, name: str) -> bool:
+        """Special-cased top-level names.  Returns True if fully handled."""
+        if name == ENV_TEMPLATE_FILENAME:
+            writer.write_file(src, target / ENV_EXAMPLE_FILENAME)
+            return True
+        if name == MANIFEST_FILENAME:
+            # Rewritten wholesale below with the resolved name/source/stamp,
+            # so copying it here would only be undone.  Never treated as a
+            # local edit: it is our own bookkeeping, not the owner's file.
+            return True
+        if name == "config.yaml":
+            if preserve_config and (target / "config.yaml").exists():
+                # Leave user's config.yaml alone on update
+                return True
+            writer.write_file(src, target / "config.yaml", always=True)
+            return True
+        return False
 
     explicit_owned = [p.strip().strip("/") for p in manifest.distribution_owned]
     explicit_owned = [p for p in explicit_owned if p]
@@ -772,22 +952,16 @@ def _copy_dist_payload(
             rel_parts = PurePosixPath(rel).parts
             if not rel_parts or rel_parts[0] in USER_OWNED_EXCLUDE:
                 continue
+            if rel_parts[0] == DIST_HASHES_FILENAME:
+                continue
             if ".." in rel_parts or PurePosixPath(rel).is_absolute():
                 continue
             src = staged.joinpath(*rel_parts)
             if not src.exists():
                 continue
-            if len(rel_parts) == 1:
-                name = rel_parts[0]
-                if name == ENV_TEMPLATE_FILENAME:
-                    shutil.copy2(src, target / ENV_EXAMPLE_FILENAME)
-                    continue
-                if name == "config.yaml" and preserve_config and (target / "config.yaml").exists():
-                    # Leave user's config.yaml alone on update
-                    continue
-            dest = target.joinpath(*rel_parts)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            _copy_entry(src, dest)
+            if len(rel_parts) == 1 and _handle_top_level(src, rel_parts[0]):
+                continue
+            writer.write(src, target.joinpath(*rel_parts))
     else:
         # Legacy behaviour: no explicit allowlist means the whole staged
         # payload (minus USER_OWNED_EXCLUDE) is distribution-owned.  Do NOT
@@ -796,16 +970,12 @@ def _copy_dist_payload(
         for entry in staged.iterdir():
             name = entry.name
 
-            if name in USER_OWNED_EXCLUDE:
+            if name in USER_OWNED_EXCLUDE or name == DIST_HASHES_FILENAME:
                 continue
-            if name == ENV_TEMPLATE_FILENAME:
-                shutil.copy2(entry, target / ENV_EXAMPLE_FILENAME)
-                continue
-            if name == "config.yaml" and preserve_config and (target / "config.yaml").exists():
-                # Leave user's config.yaml alone on update
+            if _handle_top_level(entry, name):
                 continue
 
-            _copy_entry(entry, target / name)
+            writer.write(entry, target / name)
 
     # Emit .env.EXAMPLE from manifest if the staged tree didn't ship one
     if manifest.env_requires and not (target / ENV_EXAMPLE_FILENAME).exists():
@@ -815,6 +985,8 @@ def _copy_dist_payload(
 
     # Make sure the manifest on disk reflects resolved name + source
     write_manifest(target, manifest)
+    _write_dist_hashes(target, writer.hashes)
+    return writer.preserved
 
 
 def _bootstrap_user_dirs(target: Path) -> None:
@@ -1080,11 +1252,15 @@ def install_distribution(
 
         # Fresh install: config.yaml comes from the distribution.
         _bootstrap_user_dirs(plan.target_dir)
-        _copy_dist_payload(
+        plan.preserved_paths = _copy_dist_payload(
             plan.staged_dir,
             plan.target_dir,
             plan.manifest,
             preserve_config=False,
+            # --force on install means "overwrite this profile", so it also
+            # waives the local-edit protection (nothing to protect on a fresh
+            # install anyway).
+            force=force,
         )
         _merge_mcp_into_config(plan.target_dir)
 
@@ -1107,6 +1283,7 @@ def update_distribution(
     profile_name: str,
     force_config: bool = False,
     with_programs: bool = False,
+    force: bool = False,
 ) -> InstallPlan:
     """Re-pull the distribution for an existing profile and apply updates.
 
@@ -1114,6 +1291,11 @@ def update_distribution(
     ``source:`` field.  Distribution-owned files are overwritten; user-owned
     data (memories, sessions, auth) is never touched.  ``config.yaml`` is
     preserved unless ``force_config`` is True.
+
+    A distribution-owned file edited locally since the last install/update is
+    KEPT and the incoming version is written as ``<path>.new`` (listed in the
+    returned plan's ``preserved_paths``).  ``force`` waives that protection —
+    and ``force_config`` with it — overwriting everything.
 
     ``programs`` reinstall only when the distribution version bumped (the
     version-keyed marker skips an unchanged version); ``boilerplate`` is
@@ -1150,13 +1332,14 @@ def update_distribution(
             Path(tmp),
             override_name=canon,
         )
-        plan.preserves_config = not force_config
+        plan.preserves_config = not (force_config or force)
 
-        _copy_dist_payload(
+        plan.preserved_paths = _copy_dist_payload(
             plan.staged_dir,
             plan.target_dir,
             plan.manifest,
             preserve_config=plan.preserves_config,
+            force=force,
         )
         _merge_mcp_into_config(plan.target_dir)
 

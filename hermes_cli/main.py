@@ -10343,6 +10343,9 @@ def cmd_profile(args):
             )
             print(f"\n✓ Installed '{plan.manifest.name}' v{plan.manifest.version}")
             print(f"  Profile path: {plan.target_dir}")
+            for rel in plan.preserved_paths:
+                print(f"  ⚠ kept your edited {rel} "
+                      f"(new version saved as {rel}.new)")
             for line in plan.boilerplate_report:
                 print(f"  boilerplate: {line}")
             for line in plan.programs_report:
@@ -10390,13 +10393,20 @@ def cmd_profile(args):
                 sys.exit(1)
 
             force_config = getattr(args, "force_config", False)
+            force_all = getattr(args, "force", False)
             if not getattr(args, "yes", False):
                 print(f"\nUpdate '{canon}' from: {current.source or '(no source)'}")
                 print(f"  Currently at version {current.version}")
-                if force_config:
+                if force_all:
+                    print("  --force set: EVERYTHING is overwritten, including "
+                          "config.yaml and any file you edited locally.")
+                elif force_config:
                     print("  --force-config set: config.yaml WILL be overwritten.")
                 else:
                     print("  config.yaml will be preserved (pass --force-config to overwrite).")
+                if not force_all:
+                    print("  Files you edited since the last update are kept; the new "
+                          "version lands beside each as <file>.new.")
                 print("  User data (memories, sessions, auth, .env) will NOT be touched.")
                 try:
                     answer = input("\nProceed? [y/N] ").strip().lower()
@@ -10410,8 +10420,12 @@ def cmd_profile(args):
                 canon,
                 force_config=force_config,
                 with_programs=getattr(args, "with_programs", False),
+                force=force_all,
             )
             print(f"\n✓ Updated '{plan.manifest.name}' → v{plan.manifest.version}")
+            for rel in plan.preserved_paths:
+                print(f"  ⚠ kept your edited {rel} "
+                      f"(new version saved as {rel}.new)")
             for line in plan.boilerplate_report:
                 print(f"  boilerplate: {line}")
             for line in plan.programs_report:

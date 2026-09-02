@@ -186,13 +186,20 @@ def build_profile_parser(subparsers, *, cmd_profile: Callable) -> None:
             "Fetch the distribution from its recorded source and overwrite "
             "distribution-owned files (SOUL.md, skills/, cron/, mcp.json). "
             "User data (memories, sessions, auth, .env) is never touched. "
-            "config.yaml is preserved unless --force-config is passed."
+            "A distribution file you (or the agent) edited since the last "
+            "update is kept and the incoming version is saved next to it as "
+            "<file>.new. config.yaml is preserved unless --force-config."
         ),
     )
     profile_update.add_argument("profile_name", help="Profile to update")
     profile_update.add_argument(
         "--force-config", action="store_true",
         help="Also overwrite config.yaml (normally preserved to keep user overrides)",
+    )
+    profile_update.add_argument(
+        "--force", action="store_true",
+        help="Overwrite everything, including config.yaml and files edited "
+             "locally since the last update (no .new copies are kept)",
     )
     profile_update.add_argument(
         "--with-programs", dest="with_programs", action="store_true",
