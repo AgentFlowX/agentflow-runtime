@@ -52,6 +52,42 @@ def _success(text: str):
 def _warning(text: str):
     print(color(f"  ⚠ {text}", Colors.YELLOW))
 
+
+def _describe_exc(exc: BaseException) -> str:
+    """Render an exception the way someone debugging it actually needs.
+
+    Several MCP/HTTP failures raise with an empty ``str(exc)`` — an OAuth token
+    exchange that 400s, a protocol mismatch after auth, a closed stream. The old
+    ``f"Failed to connect: {exc}"`` then printed a bare colon and the real cause
+    (type, HTTP status, response body, the exception that caused it) was lost, so
+    "it just says Failed to connect" was the whole bug report. Include the type
+    always, the status/body when the client exposes them, and the cause chain.
+    """
+    parts: list[str] = []
+    text = str(exc).strip()
+    parts.append(f"{type(exc).__name__}: {text}" if text else type(exc).__name__)
+
+    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    response = getattr(exc, "response", None)
+    if status is None and response is not None:
+        status = getattr(response, "status_code", None)
+    if status is not None:
+        parts.append(f"HTTP {status}")
+    if response is not None:
+        body = getattr(response, "text", None)
+        if isinstance(body, str) and body.strip():
+            parts.append(f"body: {body.strip()[:300]}")
+
+    seen = {id(exc)}
+    cause = exc.__cause__ or exc.__context__
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
+        ctext = str(cause).strip()
+        parts.append(f"caused by {type(cause).__name__}: {ctext}" if ctext else f"caused by {type(cause).__name__}")
+        cause = cause.__cause__ or cause.__context__
+    return " | ".join(parts)
+
+
 def _error(text: str):
     print(color(f"  ✗ {text}", Colors.RED))
 
@@ -565,7 +601,12 @@ def cmd_mcp_add(args):
     try:
         tools = _probe_single_server(name, server_config)
     except Exception as exc:
-        _error(f"Failed to connect: {exc}")
+        _error(f"Failed to connect: {_describe_exc(exc)}")
+        _info("Full traceback: HERMES_MCP_DEBUG=1 hermes mcp test " + name)
+        if os.environ.get("HERMES_MCP_DEBUG"):
+            import traceback as _tb
+
+            _tb.print_exc()
         if _confirm("Save config anyway (you can test later)?", default=False):
             server_config["enabled"] = False
             if _save_mcp_server(name, server_config):
@@ -1009,7 +1050,12 @@ def cmd_mcp_configure(args):
     try:
         all_tools = _probe_single_server(name, cfg)
     except Exception as exc:
-        _error(f"Failed to connect: {exc}")
+        _error(f"Failed to connect: {_describe_exc(exc)}")
+        _info("Full traceback: HERMES_MCP_DEBUG=1 hermes mcp test " + name)
+        if os.environ.get("HERMES_MCP_DEBUG"):
+            import traceback as _tb
+
+            _tb.print_exc()
         return
 
     if not all_tools:
