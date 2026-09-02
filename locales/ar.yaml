@@ -596,6 +596,7 @@ gateway:
   verbose:
     not_enabled:           "الأمر `/verbose` غير مُفعّل لمنصّات المراسلة.\n\nفعّله في `config.yaml`:\n```yaml\ndisplay:\n  tool_progress_command: true\n```"
     mode_off:              "⚙️ تقدّم الأدوات: **مُعطّل** — لا يُعرض نشاط الأدوات."
+    mode_compact:              "⚙️ Tool progress: **COMPACT** — one line per tool: icon + name, no arguments."
     mode_new:              "⚙️ تقدّم الأدوات: **NEW** — يُعرض عند تغيّر الأداة (طول المعاينة: `display.tool_preview_length`، افتراضي 40)."
     mode_all:              "⚙️ تقدّم الأدوات: **ALL** — يُعرض كل استدعاء أداة (طول المعاينة: `display.tool_preview_length`، افتراضي 40)."
     mode_verbose:          "⚙️ تقدّم الأدوات: **VERBOSE** — كل استدعاء أداة مع وسائطه الكاملة."

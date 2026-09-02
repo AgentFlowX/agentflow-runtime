@@ -4250,6 +4250,15 @@ class TurnRunner:
                 _cmd_short = _cmd_short + " ..."
             _code_block_short = f"{_block_header}```\n{_cmd_short}\n```"
 
+        # COMPACT mode (the product default): one line per tool call, emoji +
+        # tool name, nothing else. Arguments, previews and code blocks are a
+        # wall of noise in a chat the owner reads on a phone — "📋 todo" says
+        # what is happening; the answer says what came of it.
+        if ctx.progress_mode == "compact":
+            ctx.last_was_terminal_block[0] = False
+            ctx.progress_queue.put(f"{emoji} {tool_name}")
+            return
+
         # Verbose mode: show detailed arguments, respects tool_preview_length
         if ctx.progress_mode == "verbose":
             if _code_block_full is not None:

@@ -31,7 +31,10 @@ from typing import Any
 # and don't participate in per-platform resolution.
 
 _GLOBAL_DEFAULTS: dict[str, Any] = {
-    "tool_progress": "all",
+    # "compact" is the product default: one line per tool, icon + name, no
+    # arguments. "all" adds argument previews, "verbose" dumps raw JSON — both
+    # read as noise in a chat. Users can still cycle modes with /verbose.
+    "tool_progress": "compact",
     "tool_progress_grouping": "accumulate",  # "accumulate" = edit one bubble; "separate" = one msg per tool
     "show_reasoning": False,
     # How a reasoning/thinking summary is rendered when show_reasoning is on.
@@ -79,8 +82,12 @@ _GLOBAL_DEFAULTS: dict[str, Any] = {
 # Tier 4 (minimal): Batch/non-interactive delivery
 
 _TIER_HIGH = {
-    "tool_progress": "all",
-    "show_reasoning": False,
+    # Product default: one compact line per tool (icon + name) and a visible
+    # reasoning summary. A silent agent reads as a frozen agent; raw arguments
+    # read as noise. Users cycle modes with /verbose; hosts should NOT rewrite
+    # config.yaml to express this — the default lives here.
+    "tool_progress": "compact",
+    "show_reasoning": True,
     "tool_preview_length": 40,
     "streaming": None,  # follow global
     "interim_assistant_messages": True,
@@ -129,8 +136,9 @@ _PLATFORM_DEFAULTS: dict[str, dict[str, Any]] = {
     # via display.platforms.telegram.busy_ack_detail / tool_progress.
     "telegram":    {
         **_TIER_HIGH,
-        "tool_progress": "off",
         "busy_ack_detail": False,
+        # Progress lines are scaffolding: drop them once the answer lands.
+        "cleanup_progress": True,
     },
     # Discord has a native "subtext" primitive (-# small grey text) that reads
     # as metadata rather than content, so reasoning summaries default to it
@@ -265,7 +273,7 @@ def _normalise(setting: str, value: Any) -> Any:
             return "off"
         if val in {"true", "1", "yes", "on"}:
             return "all"
-        return val if val in {"off", "new", "all", "verbose", "log"} else "all"
+        return val if val in {"off", "compact", "new", "all", "verbose", "log"} else "compact"
     if setting in {
         "show_reasoning",
         "streaming",

@@ -1309,7 +1309,8 @@ DEFAULT_CONFIG = {
         # When false, commentary falls back to the reasoning channel and is
         # only visible when show_reasoning is enabled.
         "show_commentary": True,
-        "tool_progress_command": False,  # Enable /verbose command in messaging gateway
+        # Let people change how much the agent narrates from inside the chat.
+        "tool_progress_command": True,  # Enable /verbose command in messaging gateway
         # NOTE: display.tool_progress_overrides is deprecated and no longer
         # seeded here — use display.platforms. A user-set value is still
         # honored at runtime (gateway display_config back-compat read) and
@@ -4623,7 +4624,7 @@ OPTIONAL_ENV_VARS = {
         "category": "setting",
     },
     # HERMES_TOOL_PROGRESS_MODE is deprecated — tool progress is configured via
-    # display.tool_progress in config.yaml (off|new|all|verbose|log). The
+    # display.tool_progress in config.yaml (off|compact|new|all|verbose|log). The
     # gateway still falls back to HERMES_TOOL_PROGRESS_MODE for backward
     # compatibility, so it lives in _EXTRA_ENV_KEYS (known to reload and
     # compatibility paths) but is intentionally NOT listed here:

@@ -123,13 +123,16 @@ class TestPlatformDefaults:
     """Built-in defaults reflect platform capability tiers."""
 
     def test_high_tier_platforms(self):
-        """Discord defaults to 'all'; Telegram defaults quiet for mobile."""
+        """High-tier platforms narrate compactly: icon + tool name, no arguments."""
         from gateway.display_config import resolve_display_setting
 
-        # Telegram: tier_high transport, but quiet mobile default.
-        assert resolve_display_setting({}, "telegram", "tool_progress") == "off"
-        # Discord: pure tier_high.
-        assert resolve_display_setting({}, "discord", "tool_progress") == "all"
+        # Telegram was silent by default, which reads as a frozen agent.
+        assert resolve_display_setting({}, "telegram", "tool_progress") == "compact"
+        assert resolve_display_setting({}, "telegram", "cleanup_progress") is True
+        assert resolve_display_setting({}, "discord", "tool_progress") == "compact"
+        # An explicit user choice still wins over the product default.
+        cfg = {"display": {"platforms": {"telegram": {"tool_progress": "verbose"}}}}
+        assert resolve_display_setting(cfg, "telegram", "tool_progress") == "verbose"
 
 
     def test_low_tier_platforms(self):
@@ -231,13 +234,14 @@ class TestStreamingPerPlatform:
 # ---------------------------------------------------------------------------
 
 class TestCleanupProgress:
-    """``cleanup_progress`` is off by default and resolvable per-platform."""
+    """``cleanup_progress`` is off by default, except where progress is chatty."""
 
-    def test_default_off_for_all_platforms(self):
-        """No config set → cleanup_progress resolves to False everywhere."""
+    def test_defaults_per_platform(self):
+        """Telegram clears its progress lines; elsewhere they stay."""
         from gateway.display_config import resolve_display_setting
 
-        for plat in ("telegram", "discord", "slack", "email"):
+        assert resolve_display_setting({}, "telegram", "cleanup_progress") is True
+        for plat in ("discord", "slack", "email"):
             assert resolve_display_setting({}, plat, "cleanup_progress") is False
 
 
