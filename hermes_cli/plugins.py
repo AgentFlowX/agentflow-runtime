@@ -567,6 +567,25 @@ def _env_enabled(name: str) -> bool:
     return env_var_enabled(name)
 
 
+
+def _has_plugin_code(plugin_dir: "Path") -> bool:
+    """True when *plugin_dir* actually contains loadable plugin code.
+
+    Directory plugins import as a package, so ``__init__.py`` is the real
+    entry point. Some plugins ship a single module or a portable manifest
+    instead, so accept those too — the point is only to reject a directory
+    that has a manifest and nothing to run.
+    """
+    try:
+        if (plugin_dir / "__init__.py").exists():
+            return True
+        if (plugin_dir / "plugin.json").exists() or (plugin_dir / "plugin.json").is_symlink():
+            return True
+        return any(plugin_dir.glob("*.py"))
+    except OSError:
+        return False
+
+
 def _get_disabled_plugins() -> set:
     """Read the disabled plugins list from config.yaml.
 
@@ -4210,6 +4229,19 @@ class PluginManager:
                 manifest_file = child / "plugin.yml"
 
             if manifest_file.exists():
+                # A directory that carries a manifest but NO importable code is
+                # debris, not a plugin: a half-copied backup, an interrupted
+                # install, a folder someone cleaned out. Its manifest still
+                # claims a key, and if that key belongs to a real plugin the
+                # broken copy shadows it — the working plugin silently stops
+                # loading and every tool it provides disappears. Skip it.
+                if not _has_plugin_code(child):
+                    logger.warning(
+                        "Skipping '%s': plugin manifest without code "
+                        "(no __init__.py / plugin module) — leftover directory?",
+                        child,
+                    )
+                    continue
                 manifest = self._parse_manifest(
                     manifest_file, child, source, prefix
                 )
