@@ -605,12 +605,16 @@ def _validate_frontmatter(content: str, *, new_skill: bool = False) -> Optional[
     if len(desc) > MAX_DESCRIPTION_LENGTH:
         return f"Description exceeds {MAX_DESCRIPTION_LENGTH} characters."
     if new_skill and len(desc.strip().strip("'\"")) > SKILL_PROMPT_DESC_LIMIT:
+        # Hand back a description that WOULD pass. Without it an agent burns its
+        # turn guessing at the limit — observed live: three failed attempts in a
+        # row (130 chars, then 62, then a malformed retry that dropped `name`).
         return (
-            f"Description is {len(desc.strip())} chars — new skills must fit the "
-            f"{SKILL_PROMPT_DESC_LIMIT}-char system-prompt budget (one sentence, "
-            f"trigger first, ends with a period). The skill index truncates "
-            f"longer descriptions to {SKILL_PROMPT_DESC_LIMIT - 3} chars + '...', "
-            f"destroying the routing signal. Move detail into the skill body."
+            f"Description is {len(desc.strip())} chars — new skills must fit "
+            f"{SKILL_PROMPT_DESC_LIMIT} characters (one sentence, trigger first, "
+            f"ends with a period), because the skill index truncates longer ones "
+            f"and the routing signal is lost. Move the detail into the body and "
+            f"use a shorter description, for example:\n"
+            f"  description: {_suggest_short_description(desc)}"
         )
 
     body = content[end_match.end() + 3:].strip()
@@ -618,6 +622,23 @@ def _validate_frontmatter(content: str, *, new_skill: bool = False) -> Optional[
         return "SKILL.md must have content after the frontmatter (instructions, procedures, etc.)."
 
     return None
+
+
+
+def _suggest_short_description(desc: str) -> str:
+    """A ready-to-paste description that fits the prompt budget.
+
+    Keeps the leading trigger words (what the index routes on), cuts at a word
+    boundary, and always ends with a period so the suggestion is valid as-is.
+    """
+    text = " ".join(str(desc).strip().strip("'\"").split())
+    limit = SKILL_PROMPT_DESC_LIMIT
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1]
+    if " " in cut:
+        cut = cut[: cut.rfind(" ")]
+    return cut.rstrip(" ,;:—-") + "."
 
 
 def _validate_content_size(content: str, label: str = "SKILL.md") -> Optional[str]:
